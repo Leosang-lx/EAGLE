@@ -2,9 +2,9 @@ import json
 from transformers import AutoTokenizer
 import numpy as np
 
-tokenizer=AutoTokenizer.from_pretrained("/home/lyh/weights/hf/llama2chat/13B/")
-jsonl_file = "llama-2-chat-70b-fp16-ea-in-temperature-0.0.jsonl"
-jsonl_file_base = "llama-2-chat-70b-fp16-base-in-temperature-0.0.jsonl"
+tokenizer=AutoTokenizer.from_pretrained("/home/liux/big_file/lmsys/vicuna-13b-v1.3/")
+jsonl_file = "mt_bench/vicuna_13b_v1.3-temperature-0.0.jsonl"
+jsonl_file_base = "mt_bench/vicuna_13b_v1.3-temperature-0.0.jsonl"
 data = []
 with open(jsonl_file, 'r', encoding='utf-8') as file:
     for line in file:
