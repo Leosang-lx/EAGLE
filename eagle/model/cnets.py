@@ -29,6 +29,7 @@ from torch import nn
 
 from transformers.activations import ACT2FN
 from huggingface_hub import hf_hub_download
+from contextlib import nullcontext
 
 
 try:
@@ -667,7 +668,7 @@ class Model(nn.Module):
         self.stable_kv = None
 
     @torch.no_grad()
-    def topK_genrate(self, hidden_states, input_ids, head, logits_processor):
+    def topK_genrate(self, hidden_states, input_ids, head, logits_processor, prof=None):
 
         input_ids = input_ids.to(hidden_states.device)
         total_tokens = self.total_tokens
@@ -687,12 +688,14 @@ class Model(nn.Module):
         self.reset()
 
         # with Timer("draft many"):
-        if hasattr(self, "stable_kv") and self.stable_kv is not None:
-            kv_len = self.stable_kv[0][0].shape[2]
-            out_hidden, past_key_values = self(hidden_states, input_ids=input_ids[:, kv_len:],
-                                               past_key_values=self.stable_kv, use_cache=True)
-        else:
-            out_hidden, past_key_values = self(hidden_states, input_ids=input_ids, use_cache=True)
+        with prof.time_context('draft forward once', cpu=False) if prof else nullcontext():
+            if hasattr(self, "stable_kv") and self.stable_kv is not None:
+                kv_len = self.stable_kv[0][0].shape[2]
+                out_hidden, past_key_values = self(hidden_states, input_ids=input_ids[:, kv_len:],
+                                                past_key_values=self.stable_kv, use_cache=True)
+            else:
+                out_hidden, past_key_values = self(hidden_states, input_ids=input_ids, use_cache=True)
+        
         self.stable_kv = past_key_values
         last_hidden = out_hidden[:, -1]
 
@@ -716,45 +719,48 @@ class Model(nn.Module):
         topk_cs_index = torch.arange(top_k, device=self.embed_tokens.weight.device)
 
         # 4
-        for i in range(depth):
-            self.tree_mask = tree_mask
-            position_ids = len_posi + self.position_ids
-            # with Timer("draft one"):
-            out_hidden, past_key_values = self(input_hidden, input_ids=input_ids, past_key_values=past_key_values,
-                                               position_ids=position_ids, use_cache=True)
-            len_posi += 1
+        with prof.time_context('draft main loop', cpu=False) if prof else nullcontext():
+            for i in range(depth):
+                with prof.time_context('draft loop once', cpu=False) if prof else nullcontext():
+                    self.tree_mask = tree_mask
+                    position_ids = len_posi + self.position_ids
+                    # with Timer("draft one"):
+                    with prof.time_context('draft forward once', cpu=False) if prof else nullcontext():
+                        out_hidden, past_key_values = self(input_hidden, input_ids=input_ids, past_key_values=past_key_values,
+                                                        position_ids=position_ids, use_cache=True)
+                    len_posi += 1
 
-            # with Timer("sort1"):
-            bias1 = top_k if i > 0 else 0
-            bias2 = max(0, i - 1)
-            bias = 1 + top_k ** 2 * bias2 + bias1
-            parents = (topk_cs_index + bias)
-            parents_list.append(parents)
+                    # with Timer("sort1"):
+                    bias1 = top_k if i > 0 else 0
+                    bias2 = max(0, i - 1)
+                    bias = 1 + top_k ** 2 * bias2 + bias1
+                    parents = (topk_cs_index + bias)
+                    parents_list.append(parents)
 
-            last_headout = self.lm_head(self.norm(out_hidden[0]))
-            last_p = self.logsoftmax(last_headout)
+                    last_headout = self.lm_head(self.norm(out_hidden[0]))
+                    last_p = self.logsoftmax(last_headout)
 
-            top = torch.topk(last_p, top_k, dim=-1)
-            topk_index, topk_p = top.indices, top.values
+                    top = torch.topk(last_p, top_k, dim=-1)
+                    topk_index, topk_p = top.indices, top.values
 
-            cu_scores = topk_p + scores[:, None]
+                    cu_scores = topk_p + scores[:, None]
 
-            topk_cs = torch.topk(cu_scores.view(-1), top_k, dim=-1)
-            topk_cs_index, topk_cs_p = topk_cs.indices, topk_cs.values
-            scores = topk_cs_p
+                    topk_cs = torch.topk(cu_scores.view(-1), top_k, dim=-1)
+                    topk_cs_index, topk_cs_p = topk_cs.indices, topk_cs.values
+                    scores = topk_cs_p
 
-            out_ids = topk_cs_index // top_k
-            input_hidden = out_hidden[:, out_ids]
+                    out_ids = topk_cs_index // top_k
+                    input_hidden = out_hidden[:, out_ids]
 
-            input_ids = topk_index.view(-1)[topk_cs_index][None]
+                    input_ids = topk_index.view(-1)[topk_cs_index][None]
 
-            if self.config.vocab_size == self.config.draft_vocab_size:
-                ss_token.append(topk_index)
-            else:
-                input_ids = input_ids + self.d2t[input_ids]
-                ss_token.append(topk_index+self.d2t[topk_index])
-            scores_list.append(cu_scores)
-            tree_mask = torch.cat((tree_mask[:, :, out_ids], self.tree_mask_init), dim=3)
+                    if self.config.vocab_size == self.config.draft_vocab_size:
+                        ss_token.append(topk_index)
+                    else:
+                        input_ids = input_ids + self.d2t[input_ids]
+                        ss_token.append(topk_index+self.d2t[topk_index])
+                    scores_list.append(cu_scores)
+                    tree_mask = torch.cat((tree_mask[:, :, out_ids], self.tree_mask_init), dim=3)
 
 
         scores_list = torch.cat(scores_list, dim=0).view(-1)

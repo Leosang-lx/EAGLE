@@ -15,7 +15,7 @@ from .modeling_mixtral_kv import MixtralForCausalLM as KVMixtralForCausalLM
 from .modeling_qwen2_kv import Qwen2ForCausalLM as KVQwen2ForCausalLM
 from .utils import *
 from .kv_cache import initialize_past_key_values
-
+# cnets: eagle; cnets1: eagle3
 from .cnets import Model
 from .cnets1 import Model as Model1
 from .configs import EConfig
