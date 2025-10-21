@@ -6,8 +6,8 @@ import argparse
 # tokenizer=AutoTokenizer.from_pretrained("/home/lyh/weights/hf/llama2chat/13B/")
 bench_name = 'mt_bench'
 method = 'ea3'
-# model_tag = 'L31-8B'
-model_tag = 'V13B'
+model_tag = 'L31-8B'
+# model_tag = 'V13B'
 temperature = 0.0
 
 # SD settings
@@ -73,4 +73,9 @@ def analyze_ans(jsonl_file_path):
     print(f'{new_tokens_cnt} new tokens in {turns_cnt} turns')
     print(f'Average accept length: {new_tokens_cnt/turns_cnt}')
 
-analyze_ans(jsonl_file)
+depth_size = [(d, d*10) for d in range(3, 11)]
+for depth, total_token in depth_size:
+    jsonl_file = f'{bench_name}/{model_tag}-{method}-t{int(temperature)}-tree{total_token}-d{depth}-topk{topk}.jsonl'
+    jsonl_file = f'{root_dir}{prefix}{jsonl_file}'
+
+    analyze_ans(jsonl_file)
