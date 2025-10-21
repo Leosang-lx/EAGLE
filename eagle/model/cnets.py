@@ -544,6 +544,18 @@ class Model(nn.Module):
         for param in self.embed_tokens.parameters():
             param.requires_grad = False
 
+    def set_tree_paramters(self, top_k=None, total_tokens=None, depth=None, threshold=None):
+        if top_k is not None and top_k != self.top_k:
+            self.top_k = top_k
+            self.init_tree()
+        if total_tokens is not None:
+            self.total_tokens = total_tokens - 1
+        if depth is not None:
+            self.depth = depth
+        if threshold is not None:
+            self.threshold = math.log(threshold)
+        
+
     def init_tree(self):
         self.tree_mask_init = torch.eye(self.top_k, device=self.embed_tokens.weight.device)[None, None]
         self.position_ids = torch.zeros(self.top_k, device=self.embed_tokens.weight.device, dtype=torch.long)

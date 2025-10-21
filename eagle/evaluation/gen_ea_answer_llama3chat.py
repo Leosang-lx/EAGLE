@@ -405,7 +405,7 @@ if __name__ == "__main__":
         default="mc_sim_7b_63",
     )
     parser.add_argument(
-        "--use_eagle3",
+        "--use-eagle3",
         action="store_true"
     )
 
