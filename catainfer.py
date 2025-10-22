@@ -8,7 +8,7 @@ from eagle.model.cnets import Model
 from eagle.model.modeling_llama_kv import LlamaForCausalLM as KVLlamaForCausalLM
 
 
-def load_draft_model(ea_model_path, dtype=torch.float16, base_model_path=None):
+def load_draft_model(ea_model_path, dtype=torch.float16, base_model_path=None, device="cuda"):
     """
     Ea_layer may need the embedding layer of the base model: just the lm_head layer of eagle-3
     """
@@ -29,7 +29,7 @@ def load_draft_model(ea_model_path, dtype=torch.float16, base_model_path=None):
     if config.vocab_size == config.draft_vocab_size:
         del ea_layer.d2t, ea_layer.t2d
     ea_layer.load_state_dict(torch.load(load_model_path), strict=False)
-    ea_layer.to(dtype).to("cuda")
+    ea_layer.to(dtype).to(device)
     ea_layer.init_tree()
 
     return ea_layer

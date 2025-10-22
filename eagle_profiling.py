@@ -20,8 +20,11 @@ device = torch.device("cuda:0")
 # only load the lm_head
 # lm_head = nn.Linear(4096, 128256).cuda()
 
-ea_model_path = 'C:/model_file/yuhuili/EAGLE3-Vicuna1.3-13B/'
-base_model_path = 'C:/model_file/lmsys/vicuna-13b-v1.3'
+# prefix = "C:/model_file"
+prefix = "/home/liux/big_file"
+
+ea_model_path = f'{prefix}/yuhuili/EAGLE3-Vicuna1.3-13B/'
+base_model_path = f'{prefix}/lmsys/vicuna-13b-v1.3'
 
 config = EConfig.from_pretrained(ea_model_path)
 assert hasattr(config, 'draft_vocab_size')
@@ -35,12 +38,23 @@ except:
     bias = True
 
 # initialize draft model
-print("Initialize Eagle3 model...")
+print(f"Initialize Eagle3 model from {ea_model_path}...")
 ea_layer = Model(config, bias=bias, total_tokens=total_token, depth=depth, top_k=top_k,
                                   threshold=threshold, path=base_model_path,load_emb=True)
 
 load_model_path = os.path.join(ea_model_path, 'pytorch_model.bin')
 ea_layer_state_dict = torch.load(load_model_path)
+
+##### save eagle3-fc weight to server
+eagle3_fc_weight = ea_layer_state_dict['fc.weight']
+fc_dict = {
+    "weight": eagle3_fc_weight,
+    "in_dim": eagle3_fc_weight.shape[1],
+    "out_dim": eagle3_fc_weight.shape[0],
+}
+torch.save(fc_dict, os.path.join(base_model_path, 'eagle3_fc.bin'))
+print(f"Eagle3 fc weight saved to {base_model_path}")
+exit(0)
 
 # eagle3
 if config.vocab_size==config.draft_vocab_size:
