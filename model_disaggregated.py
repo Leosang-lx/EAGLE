@@ -13,6 +13,7 @@ from eagle.model import initialize_past_key_values
 # added
 from catainfer import load_base_model, load_draft_model
 from comm.tensor_socket import CommCS
+from utils import *
 
 
 
@@ -72,8 +73,11 @@ class Drafter(nn.Module):
         input_ids = input_ids.clone()
         self.ea_layer.reset_kv()
 
-        input_len = input_ids.shape[1]
-        prefill_async()
+        # sync prefill: send, forward, recv
+        token, mix_hidden_state = prefill_sync(self, input_ids)
+
+
+        
 
 
 
@@ -156,6 +160,18 @@ class BaseVerifer(nn.Module):
         device = self.base_model.device
         comm = self.comm
         reset_tree_mode(self)
+
+        prefill_sync(
+            self,
+            past_key_values=past_key_values,
+            logits_processor=logits_processor,
+        )
+
+        kv_cache = (past_key_values, past_key_values_data, current_length_data)
+
+
+
+
 
 
 

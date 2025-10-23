@@ -2,6 +2,7 @@ import json
 # from transformers import AutoTokenizer
 import numpy as np
 import argparse
+import matplotlib.pyplot as plt
 
 # tokenizer=AutoTokenizer.from_pretrained("/home/lyh/weights/hf/llama2chat/13B/")
 bench_name = 'mt_bench'
@@ -45,7 +46,7 @@ def analyze_ans(jsonl_file_path):
 
     # jsonl_file_base = "llama-2-chat-70b-fp16-base-in-temperature-0.0.jsonl"
     data = []
-    with open(jsonl_file, 'r', encoding='utf-8') as file:
+    with open(jsonl_file_path, 'r', encoding='utf-8') as file:
         for line in file:
             json_obj = json.loads(line)
             data.append(json_obj)
@@ -73,9 +74,12 @@ def analyze_ans(jsonl_file_path):
     print(f'{new_tokens_cnt} new tokens in {turns_cnt} turns')
     print(f'Average accept length: {new_tokens_cnt/turns_cnt}')
 
+    avg_accept_length = new_tokens_cnt/turns_cnt
+    return avg_accept_length
+
 depth_size = [(d, d*10) for d in range(3, 11)]
 for depth, total_token in depth_size:
     jsonl_file = f'{bench_name}/{model_tag}-{method}-t{int(temperature)}-tree{total_token}-d{depth}-topk{topk}.jsonl'
     jsonl_file = f'{root_dir}{prefix}{jsonl_file}'
 
-    analyze_ans(jsonl_file)
+    avg_acc = analyze_ans(jsonl_file)
