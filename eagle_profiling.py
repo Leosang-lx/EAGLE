@@ -17,14 +17,21 @@ dtype = torch.float16
 device = torch.device("cuda:0")
 
 
+# todos:
+save_eagle3_fc = False
+profile_eagle3 = True
+
 # only load the lm_head
 # lm_head = nn.Linear(4096, 128256).cuda()
 
 # prefix = "C:/model_file"
 prefix = "/home/liux/big_file"
 
-ea_model_path = f'{prefix}/yuhuili/EAGLE3-Vicuna1.3-13B/'
-base_model_path = f'{prefix}/lmsys/vicuna-13b-v1.3'
+draft_model_id = "yuhuili/EAGLE3-LLaMA3.1-Instruct-8B"
+base_model_id = "meta-llama/Meta-Llama-3.1-8B-Instruct"
+
+ea_model_path = f'{prefix}/{draft_model_id}'
+base_model_path = f'{prefix}/{base_model_id}'
 
 config = EConfig.from_pretrained(ea_model_path)
 assert hasattr(config, 'draft_vocab_size')
@@ -45,16 +52,20 @@ ea_layer = Model(config, bias=bias, total_tokens=total_token, depth=depth, top_k
 load_model_path = os.path.join(ea_model_path, 'pytorch_model.bin')
 ea_layer_state_dict = torch.load(load_model_path)
 
-##### save eagle3-fc weight to server
-eagle3_fc_weight = ea_layer_state_dict['fc.weight']
-fc_dict = {
-    "weight": eagle3_fc_weight,
-    "in_dim": eagle3_fc_weight.shape[1],
-    "out_dim": eagle3_fc_weight.shape[0],
-}
-torch.save(fc_dict, os.path.join(base_model_path, 'eagle3_fc.bin'))
-print(f"Eagle3 fc weight saved to {base_model_path}")
-exit(0)
+    ##### save eagle3-fc weight to server
+
+if save_eagle3_fc:
+
+    eagle3_fc_weight = ea_layer_state_dict['fc.weight']
+    fc_dict = {
+        "weight": eagle3_fc_weight,
+        "in_dim": eagle3_fc_weight.shape[1],
+        "out_dim": eagle3_fc_weight.shape[0],
+    }
+    torch.save(fc_dict, os.path.join(base_model_path, 'eagle3_fc.bin'))
+    print(f"Eagle3 fc weight saved to {base_model_path}")
+    
+
 
 # eagle3
 if config.vocab_size==config.draft_vocab_size:
@@ -65,22 +76,24 @@ ea_layer.init_tree()
 
 print("Eagle3 model loaded")
 
-hidden_size = config.hidden_size
+### profile eagle3
+if profile_eagle3:
+    hidden_size = config.hidden_size
 
-warmup_repeat = 30
-test_repeat = 10
+    warmup_repeat = 100
+    test_repeat = 10
 
-hidden_state = torch.randn(1, 1, hidden_size).to(dtype).to(device)
-input_ids = torch.randint(1, 32000, (1, 2), dtype=torch.int64).to(device)
-for _ in tqdm(range(warmup_repeat), desc="warm up"):
-    ea_layer.reset()
-    ea_layer.reset_kv()
-    _ = ea_layer.topK_genrate(hidden_state, input_ids, None, None)
+    hidden_state = torch.randn(1, 1, hidden_size).to(dtype).to(device)
+    input_ids = torch.randint(1, 32000, (1, 2), dtype=torch.int64).to(device)
+    for _ in tqdm(range(warmup_repeat), desc="warm up"):
+        ea_layer.reset()
+        ea_layer.reset_kv()
+        _ = ea_layer.topK_genrate(hidden_state, input_ids, None, None)
 
-for _ in tqdm(range(test_repeat)):
-    ea_layer.reset()
-    ea_layer.reset_kv()
-    with prof.profile_context('topK_genrate pipeline', cpu=False):
-        _ = ea_layer.topK_genrate(hidden_state, input_ids, None, None, prof=prof)
+    for _ in tqdm(range(test_repeat)):
+        ea_layer.reset()
+        ea_layer.reset_kv()
+        with prof.profile_context('topK_genrate pipeline', cpu=False):
+            _ = ea_layer.topK_genrate(hidden_state, input_ids, None, None, prof=prof)
 
-prof.print_all_elapsed_times()
+    prof.print_all_elapsed_times()

@@ -680,12 +680,24 @@ class Model(nn.Module):
         self.stable_kv = None
 
     @torch.no_grad()
-    def topK_genrate(self, hidden_states, input_ids, head, logits_processor, prof=None):
+    def topK_genrate(self, hidden_states, input_ids, head, logits_processor,
+                     total_tokens=None, depth=None, top_k=None,
+                     return_last=False,
+                     log=False,
+                     sort_score=False,
+                     prof=None):
 
         input_ids = input_ids.to(hidden_states.device)
-        total_tokens = self.total_tokens
-        depth = self.depth
-        top_k = self.top_k
+        # [MODIFIED] custom tree scale
+        if total_tokens is None:
+            total_tokens = self.total_tokens
+        if depth is None:
+            depth = self.depth
+        if top_k is None:
+            top_k = self.top_k
+        elif top_k != self.top_k:
+            self.top_k = top_k
+            self.init_tree()
 
         sample_token = input_ids[:, -1]
 

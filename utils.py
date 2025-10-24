@@ -1,6 +1,12 @@
 import torch
 from contextlib import nullcontext
 
+def prof_or_null(name, prof=None, cpu=False):
+    if prof is not None:
+        return prof.time_context(name, cpu=cpu)
+    else:
+        return nullcontext()
+
 # [ADD] logits processor
 def gen_token(logits=None, prob=None, logits_processor=None):
     if logits_processor is not None:
@@ -38,11 +44,9 @@ def prefill_sync(
         
     else:  # server with base model
         input_ids = comm.recv_from(device=device)  # todo: fix recv_from() on server
-        outputs, orig, hidden_states = model_wrapper.base_model(
-            input_ids, past_key_values=past_key_values, output_orig=True
+        orig, mixed_hidden_state = model_wrapper(
+            input_ids, past_key_values, output_orig=True
         )
-        # mixing multi-layer hidden state and compress transmission
-        mixed_hidden_state = model_wrapper.eagle3_fc(hidden_states)
         comm.send_to(mixed_hidden_state)  # todo: fix send_to() on server
         
         token = gen_token(logits=orig[:, -1], logits_processor=logits_processor)
@@ -51,40 +55,58 @@ def prefill_sync(
         # no return for server
 
 
-def catainfer(
-        model_wrapper,
-        kv_cache=None,
-        logits_processor=None,
-        input_ids=None,
-        token=None,
-        mixed_hidden_state=None,
-        new_token=None,
-        max_new_tokens=None,
-        max_length=None,
-        log=False,
-        prof=None
+def update_inference_inputs(
+        input_ids,
+        candidates,
+        best_candidate,
+        accept_length,
+        retrieve_indices,
+        logits_processor,
+        new_token,
+        past_key_values_data_list,
+        current_length_data,
+        model,
+        hidden_state_new,
+        sample_p,
 ):
-    comm = model_wrapper.comm
-    device = model_wrapper.device
+    prev_input_len = input_ids.shape[1]
+    # Map the best candidate indices to the original indices in the sequence
+    select_indices = (
+            retrieve_indices[best_candidate, : accept_length + 1] + prev_input_len
+    )
+    # Append the tokens from the best candidate to the input sequence
+    input_ids = torch.cat(
+        [input_ids, candidates[None, best_candidate, : accept_length + 1].to(input_ids.device)], dim=-1
+    )
+    # Update the past key values based on the selected tokens
+    # Source tensor that contains relevant past information based on the selected candidate
+    for past_key_values_data in past_key_values_data_list:
+        tgt = past_key_values_data[..., select_indices.to(past_key_values_data.device), :]
+        # Destination tensor where the relevant past information will be stored
+        dst = past_key_values_data[..., prev_input_len: prev_input_len + tgt.shape[-2], :]
+        # Copy relevant past information from the source to the destination
+        dst.copy_(tgt, non_blocking=True)
 
-    if not comm.is_server:  # drafter client
-        input_ids_ea = torch.cat((input_ids, token.to(input_ids.device)), dim=1)
-        input_len = input_ids.shape[1]
+    # Update the current length tensor (currently only support batch size is 1)
+    current_length_data.fill_(prev_input_len + tgt.shape[-2])
 
-        with prof.time_context(f'Drafter: topK_genrate', cpu=False) if prof is not None else nullcontext():
-            # todo: fix topK_genrate of eagle3
-            draft_tokens, retrieve_indices, tree_mask, tree_position_ids, last_ea_state = model_wrapper.ea_layer.topK_genrate(
-                mixed_hidden_state,
-                input_ids_ea,
-                model_wrapper.ea_layer.lm_head,
-                logits_processor,
-                total_tokens=run_config.total_tokens,
-                depth=run_config.depth,
-                top_k=run_config.top_k,
-                return_last=run_config.none_expand,
-                prof=prof,
-            )
-        tree_position_ids = tree_position_ids + input_ids.size(-1)
+    retrieve_hidden_state_new = hidden_state_new[:, retrieve_indices]
+    accept_hidden_state_new = retrieve_hidden_state_new[:, best_candidate, : accept_length + 1]
+    # token=model.base_model.lm_head(accept_hidden_state_new[:,-1]).argmax()
+    # token=token[None,None]
+    prob = sample_p
+    if logits_processor is not None:
+        token = torch.multinomial(prob, 1)
+        token = token[None]
+    else:
+        token = torch.argmax(prob)
+        token = token[None, None]
+    
+    new_token += accept_length + 1
+
+    return input_ids, new_token, None, token
+
+
     
         
 
