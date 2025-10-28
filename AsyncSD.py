@@ -194,7 +194,7 @@ class AsyncSDWrapper(nn.Module):
                     log=log,
                     prof=prof
                 )
-            else:
+            else:  # verifier server
                 self.catainfer(
                     kv_cache,
                     logits_processor,
@@ -234,7 +234,7 @@ class AsyncSDWrapper(nn.Module):
                     total_tokens=run_config.init_total_tokens,
                     depth=run_config.init_depth,
                     top_k=run_config.init_top_k,
-                    return_last=run_config.none_expand,
+                    return_last=True,
                     # prof=prof,
                 )
             if run_config.none_expand:
@@ -248,23 +248,17 @@ class AsyncSDWrapper(nn.Module):
             past_key_values, past_key_values_data, current_length_data = kv_cache
 
         pruned = False  # no verification received for the first turn
-        turn_idx = 0
+        turn_idx = -1
         while True:
             turn_idx += 1
-            
             ####################
-            ## drafter client ##
+            # drafter client
             ####################
             if not self.is_server:
                 # tree expansion
                 with prof_or_null(f'Drafter: tree_expansion', prof, cpu=False):
 
-                    if pruned:  # expand from the latest context
-                        
-                        new_ea_token = draft_tokens[:, :1].to(input_ids.device)
-                        input_ids_ea = torch.cat((input_ids, new_ea_token), dim=-1)
-
-                    else:  # expand the last tree
+                    if turn_idx == 0:  # first turn: expand the tree without pruning
                         draft_tokens2, retrieve_indices2, tree_mask2, tree_position_ids2, last_ea_state = self.ea_layer.expand_last(
                             last_ea_tree,
                             last_ea_state,
@@ -279,6 +273,26 @@ class AsyncSDWrapper(nn.Module):
                         last_ea_tree = (draft_tokens2, retrieve_indices2, tree_mask2, tree_position_ids2)
                         tree_position_ids2 = tree_position_ids2 + input_ids.size(-1)
 
+                    else:  # following turns: expand the tree based on the latest context
+
+                        # recv the latest draft
+                        accept_tokens, mixed_hidden_state = comm.recv_multi(device)
+                        # prune the newly generated draft based on the latest context
+                        draft_tokens, retrieve_indices, tree_mask, tree_position_ids = self.ea_layer
+
+                        # generate a new draft tree based on the latest context
+                        draft_tokens2, retrieve_indices2, tree_mask2, tree_position_ids2 = self.ea_layer.topK_genrate(
+                            mixed_hidden_state,
+                            ...
+                        )  # todo: fix this
+
+                        # merge the two draft trees (both roots at the latest context)
+                        draft_tokens, retrieve_indices, tree_mask, tree_position_ids = merge_trees(  # todo: fix this
+                            draft_tokens, retrieve_indices, tree_mask, tree_position_ids,
+                            draft_tokens2, retrieve_indices2, tree_mask2, tree_position_ids2
+                        )
+
+
                 # organize newly generated part of draft tokens and send to verifier
                 appended_draft_tokens = ...
                 appended_tree_mask = ...
@@ -286,17 +300,26 @@ class AsyncSDWrapper(nn.Module):
 
                 # todo: optimized send_muti() for transmission
                 comm.send_multi([appended_draft_tokens, appended_tree_mask, appended_tree_position_ids])
-                comm.
 
             #####################
-            ## verifier server ##
+            ## verifier server
             #####################
             else:  
-                # todo: optimized recv_muti() for transmission
-                draft_tokens, tree_mask, tree_position_ids = comm.recv_muti()
+
+
                 # todo: check size
                 assert True
-                ### todo: check alignment (the new token aligns with the tree)
+
+                if turn_idx > 0:  # do not check alignment for the first turn
+                    # todo: optimized recv_muti() for transmission
+                    draft_tokens, tree_mask, tree_position_ids = comm.recv_muti()  # maybe retrieve_indices?
+
+                    ### todo: check alignment (the new token aligns with the tree)
+                    # explain: 当前有前半棵树的验证结果，新采样出的token，以及接收到的后半棵树；以最低开销进行剪枝，去掉新树部分的不合法的节点
+                    left_indices, truncate = cal_pruning_info(draft_tokens, retrieve_indices, best_candidate, accept_length, token, subseq_ri_cum_depths)  # todo: fix this
+                    # 通知client剪枝信息以进行同步剪枝，client剪枝后生成新草稿
+                    comm.send_to(left_indices)
+
 
                 self.base_model.model.tree_mask = appended_tree_mask
                 ### verifier forward
@@ -332,12 +355,20 @@ class AsyncSDWrapper(nn.Module):
                     sample_p
                 )
 
+
         if not self.is_server:
             return input_ids, hidden_state, token, accpet_length_this_round, turn_idx
 
-        
-                
-            
+
+
+
+
+
+
+
+
+
+
 
 
 

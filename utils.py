@@ -65,7 +65,7 @@ def update_inference_inputs(
         new_token,
         past_key_values_data_list,
         current_length_data,
-        model,
+        # model,
         hidden_state_new,
         sample_p,
 ):
