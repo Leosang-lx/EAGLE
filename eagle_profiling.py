@@ -14,7 +14,7 @@ depth = 6
 top_k = 10
 threshold = 1.0
 dtype = torch.float16
-device = torch.device("cuda:0")
+device = torch.device("cuda:1")
 
 
 # todos:
@@ -29,6 +29,10 @@ prefix = "/home/liux/big_file"
 
 draft_model_id = "yuhuili/EAGLE3-LLaMA3.1-Instruct-8B"
 base_model_id = "meta-llama/Meta-Llama-3.1-8B-Instruct"
+# draft_model_id = "yuhuili/EAGLE3-Vicuna1.3-13B"
+# base_model_id = "lmsys/vicuna-13b-v1.3"
+# draft_model_id = "yuhuili/EAGLE3-LLaMA3.3-Instruct-70B"
+# base_model_id = "meta-llama/Llama-3.3-70B-Instruct"
 
 ea_model_path = f'{prefix}/{draft_model_id}'
 base_model_path = f'{prefix}/{base_model_id}'
