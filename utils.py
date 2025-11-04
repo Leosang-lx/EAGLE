@@ -107,14 +107,17 @@ def update_inference_inputs(
     return input_ids, new_token, None, token
 
 
-    
-        
-
-
-
-
-
-        
-
+def map_retrieve_indices(retrieve_indices, a, b):
+    # consider a is sorted, transform elements in retrieve_indices by mapping a->b
+    assert a.size(0) == b.size(0), f'a.size(0)={a.size(0)}, b.size(0)={b.size(0)}'
+    flat = retrieve_indices.reshape(-1)
+    mask = flat != -1
+    if not mask.any():
+        return torch.full_like(retrieve_indices, -1)
+    indices = torch.searchsorted(a, flat[mask])
+    valid_mask = indices < len(a)
+    result = torch.full_like(flat, -1)
+    result[mask] = b[indices[valid_mask]]
+    return result.view(retrieve_indices.shape)
 
 
