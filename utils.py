@@ -195,30 +195,79 @@ def cal_pruning_info(draft_tokens, retrieve_indices, best_candidate, accept_len,
     return left_indices, False
 
 
+def prune_retrieve_indices(draft_tokens, retrieve_indices, accept_indices, new_token):
+    """
+    Prune retrieve_indices
+    return [the pruned and processed (mapping to indices starts from zero)] and [the left indices]
+    """
+    accept_len = len(accept_indices)
+    matched_candidates = find_prefix_match(retrieve_indices, accept_indices)
+    next_indices_draft = retrieve_indices[matched_candidates, accept_len]
+    next_tokens_draft = draft_tokens[0, next_indices_draft]
+
+    same_indices = torch.nonzero(next_tokens_draft.cpu() == new_token.cpu()).squeeze(1)  # try to accelerate with numpy
+    if same_indices.numel() == 0:
+        # truncate: the sampled next token is unmatched with the current
+        return None, None
+
+    left_candidates = matched_candidates[same_indices]
+    left_retrieve_indices = retrieve_indices[left_candidates, accept_len + 1:]
+    left_draft_indices = process_retrieve_indices(left_retrieve_indices)
+
+    left_indices_from_zero = torch.arange(left_draft_indices.size(-1), dtype=torch.long)
+    mapped_retrieve_indices = map_retrieve_indices(left_retrieve_indices, left_draft_indices, left_indices_from_zero)
+
+    return mapped_retrieve_indices, left_draft_indices
+ 
+
 def verifier_prune_draft(draft_tokens, tree_mask, tree_pos_ids, retrieve_indices, best_candidate, accept_indices, next_token):
     accept_len = len(accept_indices)
     # cur_path_depth = (retrieve_indices[best_candidate, :] != -1).sum().item()
     if accept_len == retrieve_indices.size(-1) or retrieve_indices[best_candidate, accept_len] == -1:
         # reach the leaf node
         return True, None
+    
+    # prune retrieve_indices and get left_indices (not including the accept_indices)
+    pruned_retrieve_indices, left_draft_indices = prune_retrieve_indices(draft_tokens, retrieve_indices, accept_indices, next_token)
+    if pruned_retrieve_indices is None:
+        return True, None
 
-    # judge whether the new token follows the tree
-    matched_candidates = find_prefix_match(retrieve_indices, accept_indices)
-    next_indices_draft = retrieve_indices[matched_candidates, accept_len]
-    next_tokens_draft = draft_tokens[0, next_indices_draft]
+    # # judge whether the new token follows the tree
+    # matched_candidates = find_prefix_match(retrieve_indices, accept_indices)
+    # next_indices_draft = retrieve_indices[matched_candidates, accept_len]
+    # next_tokens_draft = draft_tokens[0, next_indices_draft]
 
-    same_indices = torch.nonzero(next_tokens_draft.cpu() == next_token.cpu()).squeeze(1)
-    if same_indices.numel() == 0:
-        # truncate: unmatched token
+    # same_indices = torch.nonzero(next_tokens_draft.cpu() == next_token.cpu()).squeeze(1)
+    # if same_indices.numel() == 0:
+    #     # truncate: unmatched token
+    #     return True, None
+    
+    # ### draft pruning
+    # # todo: cal left_indices to prune the draft
+    # left_candidates = matched_candidates[same_indices]
+    # left_retrieve_indices = retrieve_indices[left_candidates, accept_len + 1:]
+    # left_draft_indices = process_retrieve_indices(left_retrieve_indices)
+
+    # left_indices_from_zero = torch.arange(left_draft_indices.size(-1), dtype=torch.long)
+    # mapped_retrieve_indices = map_retrieve_indices(left_retrieve_indices, left_draft_indices, left_indices_from_zero)
+
+    draft_tokens = draft_tokens[:, left_draft_indices]
+    tree_pos_ids = tree_pos_ids[:, left_draft_indices]
+    tree_mask = tree_mask[..., left_draft_indices[:, None], left_draft_indices]
+
+    return False, (draft_tokens, tree_mask, tree_pos_ids, pruned_retrieve_indices)
+
+
+def drafter_prune_draft(draft_tokens, tree_mask, tree_pos_ids, retrieve_indices, accept_indices, next_token):
+    # fixme: when the accepted tokens reach the leaf node
+    pruned_retrieve_indices, left_draft_indices = prune_retrieve_indices(draft_tokens, retrieve_indices, accept_indices, next_token)
+    if pruned_retrieve_indices is None:
         return True, None
     
-    ### draft pruning
-    # todo: cal left_indices to prune the draft
-    left_candidates = matched_candidates[same_indices]
-    left_retrieve_indices = retrieve_indices[left_candidates, accept_len + 1:]
-    mapped_retrieve_indices = map_retrieve_indices(left_retrieve_indices,)
-
-
+    draft_tokens = draft_tokens[:, left_draft_indices]
+    tree_pos_ids = tree_pos_ids[:, left_draft_indices]
+    tree_mask = tree_mask[..., left_draft_indices[:, None], left_draft_indices]
+    return False, (draft_tokens, tree_mask, tree_pos_ids, pruned_retrieve_indices)
 
 
 def verifier_pruning(

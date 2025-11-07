@@ -134,6 +134,7 @@ class AsyncSDWrapper(nn.Module):
             max_length=2048,
             log=False,
             is_llama3=False,
+            prof=None,
     ):
         ##### initialization #####
         if is_llama3:
@@ -194,13 +195,13 @@ class AsyncSDWrapper(nn.Module):
                     max_new_tokens=max_new_tokens,
                     max_length=max_length,
                     log=log,
-                    prof=prof
+                    prof=prof,
                 )
             else:  # verifier server
                 self.catainfer(
                     kv_cache,
                     logits_processor,
-                    prof=prof
+                    prof=prof,
                 )
 
     def catainfer(
@@ -281,7 +282,7 @@ class AsyncSDWrapper(nn.Module):
                         # recv the latest context
                         pruning_info, mixed_hidden_state = comm.recv_multi(device)
                         # pruning based on the latest context first
-                        accept_tokens, truncate, pruned_tree = drafter_pruning(  # todo: fix this
+                        accept_tokens, truncate, pruned_tree = drafter_prune_draft(  # todo: fix this
                             pruning_info,
                             last_ea_tree
                         )
@@ -295,14 +296,15 @@ class AsyncSDWrapper(nn.Module):
 
                         input_ids_ea = torch.cat((input_ids, token), dim=-1)
                         # prune the newly generated draft based on the latest context
-                        draft_tokens, retrieve_indices, tree_mask, tree_position_ids = self.ea_layer
+                        # draft_tokens, retrieve_indices, tree_mask, tree_position_ids = self.ea_layer
+
+                        # draft_tokens2, retrieve_indices2, tree_mask2, tree_position_ids2 = self.ea_layer.topK_genrate(
+                        #     mixed_hidden_state,
+                        #     input_ids_ea
+                        # )  # todo: fix this
 
                         # generate a new draft tree based on the latest context
-                        draft_tokens2, retrieve_indices2, tree_mask2, tree_position_ids2 = self.ea_layer.topK_genrate(
-                            mixed_hidden_state,
-                            input_ids_ea
-                        )  # todo: fix this
-                        draft_tokens, retrieve_indices, tree_mask, tree_position_ids, last_ea_state = self.ea_layer.topK_genrate(
+                        draft_tokens2, retrieve_indices2, tree_mask2, tree_position_ids2, _ = self.ea_layer.topK_genrate(
                             mixed_hidden_state,
                             input_ids_ea,
                             self.ea_layer.lm_head,
@@ -310,8 +312,8 @@ class AsyncSDWrapper(nn.Module):
                             total_tokens=run_config.init_total_tokens,
                             depth=run_config.init_depth,
                             top_k=run_config.init_top_k,
-                            return_last=True,
-                            # prof=prof,
+                            # return_last=True,
+                            prof=prof,
                         )
                         # merge the two draft trees (both roots at the latest context)
                         draft_tokens, retrieve_indices, tree_mask, tree_position_ids = merge_two_tree(  # todo: fix this
@@ -351,11 +353,13 @@ class AsyncSDWrapper(nn.Module):
                     # left_indices: including the newly appended part
                     # left_indices, truncate = cal_pruning_info(draft_tokens, retrieve_indices, best_candidate, accept_length, token, subseq_ri_cum_depths)  # todo: fix this
 
-                    truncate, pruned_tree = verifier_prune_draft(draft_tokens, tree_mask, tree_position_ids, retrieve_indices, best_candidate, accept_indices, next_token)
+                    truncate, pruned_tree = verifier_prune_draft(draft_tokens, tree_mask, tree_position_ids, retrieve_indices, best_candidate, accept_indices, sample_token)
                     
                     # comm.send_to(left_indices)
                     if truncate:
                         break
+                    else:
+                        draft_tokens, retrieve_indices, tree_mask, tree_position_ids = pruned_tree
 
 
                 self.base_model.model.tree_mask = appended_tree_mask
@@ -400,7 +404,7 @@ class AsyncSDWrapper(nn.Module):
                 mixed_hidden_state = self.eagle3_fc[hidden_states]
                 pruning_info = torch.cat((accept_indices, sample_token[None]), dim=0)
                 # send the pruning info (accept_draft_indices + sample_token) and the mixed hidden state to drafter at once after completing verification
-                comm.send_multi((pruning_info, mixed_hidden_state))
+                comm.send_multi((pruning_info, mixed_hidden_state))  # maybe send before update_inference_inputs?
 
         if not self.is_server:
             gt_hidden_state = torch.cat(accept_hidden_states, dim=-2)
