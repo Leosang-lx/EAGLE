@@ -21,11 +21,11 @@ class ASDConfig:
     prof: bool = True
     
     if mode == 'demo':
-        prompt: str ='Hello'
+        your_message: str ='Hello'
         temperature: float = 0.0
     
     # model path
-    if platform == 'server':
+    if platform == 'client':
         weights_dir: str = '/home/liux/big_file/'
     else:
         weights_dir: str = 'C:/model_file/'

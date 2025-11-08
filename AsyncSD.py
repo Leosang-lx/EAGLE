@@ -88,13 +88,15 @@ class AsyncSDWrapper(nn.Module):
         # init model based on self.is_server
         if not self.is_server:  # drafter client
             print(f'Loading draft model from {ea_model_path}...')
+            dtype = kwargs['torch_dtype']
+            device = kwargs['device_map']
             self.ea_layer = load_draft_model(
                 ea_model_path,
                 dtype=dtype,
                 base_model_path=base_model_path,
                 device=device,
             )
-            self.device = self.ea_layer.device
+            self.device = torch.device(device)
             print("Loading draft model: done.")
         
         else:  # verifier server
@@ -116,15 +118,31 @@ class AsyncSDWrapper(nn.Module):
             else:
                 raise NotImplementedError("Only support eagle3 for now")
             
-    def forward(self, input_ids, past_key_values, tree_mask=None, tree_position_ids=None, output_orig=True, mix_hs=False):
-        outputs, orig, hidden_states = self.base_model(
-            input_ids, past_key_values=past_key_values, output_orig=output_orig
-        )
+    def forward(
+            self,
+            input_ids=None,
+            past_key_values=None,
+            attention_mask=None,
+            position_ids=None,
+            output_orig=True,
+            mix_hs=False
+        ):
+        with torch.inference_mode():
+            outputs = self.base_model.model(
+                input_ids=input_ids,
+                attention_mask=attention_mask,
+                past_key_values=past_key_values,
+                position_ids=position_ids,
+            )
+            if output_orig:
+                orig = self.base_model.lm_head(outputs[0])
+            hidden_states = outputs[0]
+            
         # eagle3: mixing multi-layer hidden state and compress for lower transmission
         if mix_hs:
-            hidden_state = self.eagle3_fc(hidden_states)
-            return orig, hidden_state
-        return orig, None
+            mixed_hidden_state = self.eagle3_fc(hidden_states)
+            return orig, mixed_hidden_state
+        return orig, hidden_states
     
     def prefill_sync(
             self,

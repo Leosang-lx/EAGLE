@@ -67,7 +67,7 @@ def main():
             input_ids = asd_model.tokenizer([prompt]).input_ids
         
         input_ids = torch.as_tensor(input_ids).cuda()
-        print('User Prompt:', prompt)
+        print('Input Length', input_ids.size(-1))
 
     # [warm-up]
     if rconfig.warmup:

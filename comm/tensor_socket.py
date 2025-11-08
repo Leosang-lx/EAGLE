@@ -14,15 +14,15 @@ import psutil
 DTYPE_MAP = {
     1: torch.int8,
     2: torch.float16,
-    3: torch.int32,
-    4: torch.int64,
+    4: torch.int32,
+    8: torch.int64,
 }
 
 NP_DTYPE_MAP = {
     1: np.int8,
     2: np.float16,
-    3: np.int32,
-    4: np.int64,
+    4: np.int32,
+    8: np.int64,
 }
 
 MAX_DIMS = 4
@@ -184,12 +184,12 @@ class CommCS(CommZMQ):
             self.recv_queues = {}  # {identity: Queue}
             self._start_threads()
 
-            # # wait at least one client registered
-            # print("[SERVER] Waiting for clients...")
-            # while not self.recv_queues:
-            #     time.sleep(1)
-            # # for single-request test
-            # self.client_identity = next(iter(self.recv_queues))
+            # wait at least one client registered
+            print("[SERVER] Waiting for clients...")
+            while not self.recv_queues:
+                time.sleep(1)
+            # for single-request test
+            self.client_identity = next(iter(self.recv_queues))
 
         else:  # client
             self.socket = self.context.socket(zmq.DEALER)
