@@ -181,8 +181,14 @@ class CommCS(CommZMQ):
             # self.identifers = {}  # {identity: timestamp}
             self.recv_queues = {}  # {identity: Queue}
             self._start_threads()
+            # wait at least one client registered
+            print("[Server] Waiting for clients...")
+            while not self.recv_queues:
+                time.sleep(1)
+            # for single-request test
+            self.client_identity = next(iter(self.recv_queues))
 
-        else:
+        else:  # client
             self.socket = self.context.socket(zmq.DEALER)
             self.socket.connect(self.serve_url)
             self.poller.register(self.socket, zmq.POLLIN)
@@ -290,7 +296,15 @@ class CommCS(CommZMQ):
         """
         API for sending tensor: both client and server
         """
-        self.send_queue.put(tensor if identity is None else (identity, tensor))
+        if self.is_server:
+            if identity is None:
+                while self.client_identity is None:
+                    time.sleep(0.1)
+                identity = self.client_identity
+            self.send_queue.put((identity, tensor))
+        else:
+            self.send_queue.put(tensor)
+        # self.send_queue.put(tensor if identity is None else (identity, tensor))
 
     def recv_from(self, identity=None, device=None):
         """
