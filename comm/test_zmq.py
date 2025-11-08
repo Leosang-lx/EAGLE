@@ -12,7 +12,7 @@ device = torch.device('cuda:0')
 
 
 # port defined in comm/tensor_socket.py
-def server_process(server_ip):
+def server_process(server_ip='localhost'):
     test_tensor = torch.randn(tensor_size, dtype=torch.float16).to(device)
 
     """服务器进程"""
@@ -22,7 +22,7 @@ def server_process(server_ip):
     server = CommCS(server_ip, is_server=True)
     
     # 等待客户端连接
-    time.sleep(1)
+    time.sleep(3)
     
     print(f"[SERVER] Server started and waiting for client")
     
@@ -36,6 +36,7 @@ def server_process(server_ip):
     for identity in server.recv_queues.keys():
         client_identity = identity
         break
+    assert client_identity is not None
     
     # # 创建测试张量
     # tensor_size = (100, 100)
@@ -88,7 +89,7 @@ def server_process(server_ip):
     server.stop()
     print("[SERVER] Server closed")
 
-def client_process(server_ip):
+def client_process(server_ip='localhost'):
     test_tensor = torch.randn(tensor_size, dtype=torch.float16).to(device)
 
     """客户端进程"""
