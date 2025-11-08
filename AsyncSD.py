@@ -151,7 +151,10 @@ class AsyncSDWrapper(nn.Module):
 
         if not self.is_server:  # drafter client
             input_ids = input_ids.clone()
+            input_len = input_ids.shape[1]
             self.ea_layer.reset_kv()
+            new_token = 0
+            turns_cnt = 0
 
         else:  # verifier server
             if hasattr(self, "past_key_values"):
@@ -191,7 +194,7 @@ class AsyncSDWrapper(nn.Module):
                     input_ids=input_ids,
                     token=token,
                     hidden_state=hidden_state,
-                    new_token=new_token,
+                    next_token=new_token,
                     max_new_tokens=max_new_tokens,
                     max_length=max_length,
                     log=log,
@@ -203,6 +206,37 @@ class AsyncSDWrapper(nn.Module):
                     logits_processor,
                     prof=prof,
                 )
+
+            if not self.is_server:  # drafter client
+                input_ids, hidden_state, next_token, accept_length, turns = outputs
+                new_token += accept_length
+                if log:
+                    turns_cnt += turns
+
+                if input_ids is not None and self.tokenizer is not None:
+                    if is_llama3 and stop_token_id in input_ids[0, input_len:].tolist():
+                        should_stop = torch.tensor(1, dtype=torch.int32, device=self.stage_base_model.device)
+                    elif self.tokenizer.eos_token_id in input_ids[0, input_len:].tolist():
+                        should_stop = torch.tensor(1, dtype=torch.int32, device=self.stage_base_model.device)
+                    elif new_token > max_new_tokens:
+                        should_stop = torch.tensor(1, dtype=torch.int32, device=self.stage_base_model.device)
+                    elif input_ids.shape[1] > max_length:
+                        should_stop = torch.tensor(1, dtype=torch.int32, device=self.stage_base_model.device)
+                    
+                    comm.send_to(should_stop, src=0)
+                    if should_stop.item() == 1:
+                        break
+            else:
+                should_stop = comm.recv_from()
+                if should_stop.item() == 1:
+                    break
+        
+        if self.is_draft_stage:
+            if not log:
+                return input_ids
+            else:
+                return input_ids, new_token, round_idx, turns_cnt
+
 
     def catainfer(
             self,
@@ -252,7 +286,7 @@ class AsyncSDWrapper(nn.Module):
         else:  # verifier server
             past_key_values, past_key_values_data, current_length_data = kv_cache
 
-        pruned = False  # no verification received for the first turn
+        # pruned = False  # no verification received for the first turn
         turn_idx = -1
         while True:
             turn_idx += 1
@@ -380,7 +414,7 @@ class AsyncSDWrapper(nn.Module):
                     best_candidate, accept_length, sample_p = evaluate_posterior(
                         orig, candidates, logits_processor
                     )
-                
+                # next_token = gen_token(prob=sample_p, logits_processor=logits_processor)
                 # Do the following:
                 # - add accepted tokens to input_ids
                 # - sample the new token

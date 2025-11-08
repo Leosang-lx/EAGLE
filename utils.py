@@ -97,17 +97,19 @@ def update_inference_inputs(
     accept_hidden_state_new = retrieve_hidden_state_new[:, best_candidate, : accept_length + 1]
     # token=model.base_model.lm_head(accept_hidden_state_new[:,-1]).argmax()
     # token=token[None,None]
-    prob = sample_p
-    if logits_processor is not None:
-        token = torch.multinomial(prob, 1)
-        token = token[None]
-    else:
-        token = torch.argmax(prob)
-        token = token[None, None]
+    # prob = sample_p
+    # if logits_processor is not None:
+    #     token = torch.multinomial(prob, 1)
+    #     token = token[None]
+    # else:
+    #     token = torch.argmax(prob)
+    #     token = token[None, None]
+    
+    next_token = gen_token(prob=sample_p, logits_processor=logits_processor)
     
     new_token += accept_length + 1
 
-    return accept_indices, input_ids, new_token, None, token
+    return accept_indices, input_ids, new_token, None, next_token
 
 
 def map_retrieve_indices(retrieve_indices, a, b):
