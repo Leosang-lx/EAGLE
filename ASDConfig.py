@@ -15,7 +15,10 @@ class ASDConfig:
     warmup: int = 10
     test: int = 10
 
+    max_new_tokens: int = 256
+
     log: bool = True
+    prof: bool = True
     
     if mode == 'demo':
         prompt: str ='Hello'
@@ -41,7 +44,7 @@ class ASDConfig:
         }
     }
 
-    base_model_path = model_dir[model_name]['base_dir']
-    draft_model_path = model_dir[model_name][spec_method]
+    base_model_path: str = weights_dir + model_dir[model_name]['base_dir']
+    ea_model_path: str = weights_dir + model_dir[model_name][f'{spec_method}_dir']
 
 config = ASDConfig()

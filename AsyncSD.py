@@ -4,6 +4,8 @@ import json
 import torch
 import torch.nn as nn
 from transformers import AutoConfig, AutoTokenizer
+import logging
+
 # eagle origin
 from eagle.model.configs import EConfig
 from eagle.model.cnets import Model
@@ -13,12 +15,38 @@ from eagle.model.utils import (
     reset_tree_mode,
     evaluate_posterior,
 )
-from eagle.model import initialize_past_key_values
+from eagle.model.kv_cache import initialize_past_key_values
 # added
-from catainfer import load_base_model, load_draft_model
 from comm.tensor_socket import CommCS
 from utils import *
 from ASDConfig import config as run_config
+
+
+def load_draft_model(ea_model_path, dtype=torch.float16, base_model_path=None, device="cuda"):
+    """
+    Ea_layer may need the embedding layer of the base model: just the lm_head layer of eagle-3
+    """
+    config = EConfig.from_pretrained(ea_model_path)
+    assert hasattr(config, "draft_vocab_size")
+
+    configpath = os.path.join(ea_model_path, "config.json")
+    with open(configpath, "r") as f:
+        con = json.loads(f.read())
+    try:
+        bias = con['bias']
+    except:
+        bias = True
+    
+    ea_layer = Model(config, bias=bias, path=base_model_path, load_emb=True)
+    load_model_path = os.path.join(ea_model_path, "pytorch_model.bin")
+    
+    if config.vocab_size == config.draft_vocab_size:
+        del ea_layer.d2t, ea_layer.t2d
+    ea_layer.load_state_dict(torch.load(load_model_path), strict=False)
+    ea_layer.to(dtype).to(device)
+    ea_layer.init_tree()
+
+    return ea_layer
 
 
 class AsyncSDWrapper(nn.Module):
@@ -30,12 +58,12 @@ class AsyncSDWrapper(nn.Module):
             use_eagle3,
             base_model_path,
             ea_model_path=None,
-            total_token=60,
-            depth=6,
-            top_k=10,
-            threshold=1.0,
-            dtype=torch.float16,
-            device="cuda",
+            # total_token=60,
+            # depth=6,
+            # top_k=10,
+            # threshold=1.0,
+            # dtype=torch.float16,
+            # device="cuda",
             init_comm=False,
             server_ip=None,
             is_server=None,
@@ -59,23 +87,27 @@ class AsyncSDWrapper(nn.Module):
         
         # init model based on self.is_server
         if not self.is_server:  # drafter client
-            self.ea_layer = load_base_model(
+            print(f'Loading draft model from {ea_model_path}...')
+            self.ea_layer = load_draft_model(
                 ea_model_path,
                 dtype=dtype,
                 base_model_path=base_model_path,
                 device=device,
             )
             self.device = self.ea_layer.device
+            print("Loading draft model: done.")
         
         else:  # verifier server
             Type = AutoConfig.from_pretrained(base_model_path).architectures[0]
             assert Type == "LlamaForCausalLM", "Only LlamaForCausalLM is supported for now"
 
+            print(f'Loading base model from {base_model_path}...')
             self.base_model = KVLlamaForCausalLM.from_pretrained(base_model_path, **kwargs)
             self.device = self.base_model.device
             self.config = self.base_model.config
             self.vocab_size = self.base_model.lm_head.weight.shape[0]
             self.hidden_size = self.base_model.lm_head.weight.shape[-1]
+            print("Loading base model: done.")
 
             if use_eagle3:
                 eagle3_fc_dict = torch.load(os.path.join(base_model_path, 'eagle3_fc.bin'))
@@ -168,7 +200,7 @@ class AsyncSDWrapper(nn.Module):
                     past_key_values,
                     past_key_values_data,
                     current_length_data,
-                ) = initialize_past_key_values(self.stage_base_model)
+                ) = initialize_past_key_values(self.base_model)
                 self.past_key_values = past_key_values
                 self.past_key_values_data = past_key_values_data
                 self.current_length_data = current_length_data

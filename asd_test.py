@@ -1,19 +1,22 @@
+### SINGLE REQUEST test: 1*SERVER + 1*CLIENT
+
 from fastchat.model import get_conversation_template
 from fastchat.llm_judge.common import load_questions
 import os
 from tqdm import tqdm
 import torch
 
-from AsyncSD import AsyncSDWrapper
+from AsyncSD import AsyncSDWrapper, load_draft_model
 from profiler import prof
 from ASDConfig import config as rconfig
+from utils import prof_or_null
 
-server_ip = os.environ['SERVER_IP']
+server_ip = '172.18.36.132'
 
 def main():
     assert torch.cuda.is_available(), "CUDA is not available"
-    device = torch.device("cuda")
-    torch.set_grad_enable(False)
+    device = 0
+    torch.set_grad_enabled(False)
 
     torch.cuda.set_device(device)
 
@@ -21,10 +24,11 @@ def main():
         use_eagle3=True,
         base_model_path=rconfig.base_model_path,
         ea_model_path=rconfig.ea_model_path,
-        dtype=torch.float16,
-        device=device,
         init_comm=True,
         server_ip=server_ip,
+        torch_dtype=torch.float16,
+        # use_safetensors=True,
+        device_map=f'cuda:{device}'
     )
     is_server = asd_model.is_server
 
@@ -61,27 +65,56 @@ def main():
             prompt = conv.get_prompt() + " "
 
             input_ids = asd_model.tokenizer([prompt]).input_ids
-
+        
+        input_ids = torch.as_tensor(input_ids).cuda()
         print('User Prompt:', prompt)
 
-        # [warm-up]
-        if rconfig.warmup:
-            cnt = tqdm(range(rconfig.warmup_num), desc='Warm-up') if not is_server else range(rconfig.warmup_num)
-            for _ in cnt:
-                outputs = run(
-                    asd_wrapper=asd_model,
+    # [warm-up]
+    if rconfig.warmup:
+        cnt = tqdm(range(rconfig.warmup), desc='Warm-up') if not is_server else range(rconfig.warmup)
+        for _ in cnt:
+            outputs = run(
+                asd_model,
+                input_ids if not is_server else None,
+            )
+    
+    # [test generation]
+    cnt = tqdm(range(rconfig.num), desc='Test') if not is_server else range(rconfig.num)
+    for i in cnt:
+        name = 'SERVER' if is_server else 'CLIENT'
+        with prof_or_null(f'{name} co_generate', prof):
+            outputs = run(
+                asd_model,
+                input_ids if not is_server else None,
+                rconfig.log if not is_server else False,
+                rconfig.prof
+            )
+    # [show]
+    if not is_server:
+        if rconfig.log:
+            output_ids, new_tokens, spec_rounds, turns = outputs
+        else:
+            output_ids = outputs
+        output = asd_model.tokenizer.decode(output_ids[0])
+        print('Generated:', output)
+        if rconfig.log:
+            print('New tokens:', new_tokens)
+            print('Spec rounds:', spec_rounds)
+            print('Turns:', turns)
 
-                )
+
+    prof.print_all_events()
+
+    asd_model.comm.stop()
 
 def run(asd_wrapper, input_ids=None, log=False, profiler=None):
     outputs = asd_wrapper.co_generate(
         input_ids=input_ids,
         temperature=rconfig.temperature,
-        max_new_token=rconfig.max_new_tokens,
-        max_length=rconfig.max_length,
+        max_new_tokens=rconfig.max_new_tokens,
         log=log,
         prof=profiler,
-        is_llama3=rconfig.model_name.lower().startswith('llama3'),
+        is_llama3='llama3' in rconfig.model_name.lower(),
     )
     if not asd_wrapper.is_server:
         return outputs

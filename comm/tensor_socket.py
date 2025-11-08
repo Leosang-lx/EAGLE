@@ -9,6 +9,7 @@ from queue import Queue, Empty
 import time
 import traceback
 import sys
+import psutil
 
 DTYPE_MAP = {
     1: torch.int8,
@@ -30,6 +31,16 @@ HEADER_FORMAT = "6i"
 PORT = 12345
 SUBNET = '192.168.1'
 
+def match_ip_from_local(ip2match):
+    all_ips = psutil.net_if_addrs()
+    for interface, ip_addrs in all_ips.items():
+        for ip in ip_addrs:
+            if ip.family in (socket.AF_INET, socket.AF_INET6):
+                if ip.address == ip2match:
+                    return interface
+    return None
+    
+
 def get_ip_addr(__subnet__: str):  # get ip by the prefix of __subnet__
     subnet = __subnet__ if __subnet__ else SUBNET
     status, ip_addr = getstatusoutput(f'ifconfig | grep "{subnet}" | awk \'{{print $2}}\'')
@@ -37,16 +48,6 @@ def get_ip_addr(__subnet__: str):  # get ip by the prefix of __subnet__
         return ip_addr
     return None
 
-def get_all_ips():
-    hostname = socket.gethostname()
-    try:
-        ip_list = socket.getaddrinfo(hostname, None)
-        ips = set()
-        for result in ip_list:
-            ips.add(result[4][0])
-        return list(ips)
-    except:
-        return []
 
 def gen_header(tensor: torch.Tensor):
     ndim = len(tensor.shape)
@@ -102,7 +103,8 @@ class CommZMQ:
         self.context = zmq.Context()
         self.server_ip = server_ip
         self.serve_url = f'tcp://{server_ip}:{PORT}'
-        self.is_server = self.server_ip in get_all_ips()
+        matched_interface = match_ip_from_local(server_ip)
+        self.is_server = matched_interface is not None
         # if self.is_server:
             # self.client_ID_trace = 0
 
@@ -181,12 +183,13 @@ class CommCS(CommZMQ):
             # self.identifers = {}  # {identity: timestamp}
             self.recv_queues = {}  # {identity: Queue}
             self._start_threads()
-            # wait at least one client registered
-            print("[Server] Waiting for clients...")
-            while not self.recv_queues:
-                time.sleep(1)
-            # for single-request test
-            self.client_identity = next(iter(self.recv_queues))
+
+            # # wait at least one client registered
+            # print("[SERVER] Waiting for clients...")
+            # while not self.recv_queues:
+            #     time.sleep(1)
+            # # for single-request test
+            # self.client_identity = next(iter(self.recv_queues))
 
         else:  # client
             self.socket = self.context.socket(zmq.DEALER)
@@ -224,6 +227,9 @@ class CommCS(CommZMQ):
         self.recv_queues[identity] = Queue()
         self.socket.send_multipart([identity, identity])
         print(f"Client {identity} registered")
+
+        if self.client_identity is None:
+            self.client_identity = next(iter(self.recv_queues))
 
 
     def _handle_recv_tensor(self, identity, header, content):
@@ -298,8 +304,11 @@ class CommCS(CommZMQ):
         """
         if self.is_server:
             if identity is None:
-                while self.client_identity is None:
-                    time.sleep(0.1)
+                # if self.client_identity is None:
+                #     while not self.recv_queues:
+                #         time.sleep(0.5)
+                #     self.client_identity = next(iter(self.recv_queues))
+                # else:
                 identity = self.client_identity
             self.send_queue.put((identity, tensor))
         else:
@@ -311,6 +320,8 @@ class CommCS(CommZMQ):
         API for receiving tensor: both client and server
         """
         if self.is_server:
+            if identity is None:
+                identity = self.client_identity
             tensor = self.recv_queues[identity].get()
         else:
             tensor = self.recv_queue.get()
@@ -324,4 +335,6 @@ class CommCS(CommZMQ):
         self.close()
 
     
-
+if __name__ == "__main__":
+    import psutil
+    print(psutil.net_if_addrs())

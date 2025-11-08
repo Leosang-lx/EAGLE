@@ -106,7 +106,7 @@ def update_inference_inputs(
     #     token = token[None, None]
     
     next_token = gen_token(prob=sample_p, logits_processor=logits_processor)
-    
+
     new_token += accept_length + 1
 
     return accept_indices, input_ids, new_token, None, next_token

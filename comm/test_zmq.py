@@ -21,9 +21,6 @@ def server_process(server_ip='localhost'):
     # 服务器IP设置为本地
     server = CommCS(server_ip, is_server=True)
     
-    # 等待客户端连接
-    time.sleep(3)
-    
     print(f"[SERVER] Server started and waiting for client")
     
     # 存储接收到的张量和时间戳
