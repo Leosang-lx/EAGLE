@@ -17,7 +17,7 @@ dtype = torch.float16
 device = torch.device("cuda:1")
 
 
-# todos:
+# TODOs:
 save_eagle3_fc = False
 profile_eagle3 = True
 

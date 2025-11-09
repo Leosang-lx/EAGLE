@@ -5,12 +5,13 @@ from typing import List
 class ASDConfig:
     platform = 'server'  # 'server' or 'client'
     mode = 'demo'  # 'demo' or 'eval'
-    model_name: str = 'vicuna-13b'
+    model_name: str = 'llama3.1-8b'
     spec_method: str = 'ea3'  # 'ea' or 'ea3'
 
     total_token: int = 64
     top_k: int = 10
     depth: int = 6
+    expand_size: int = 64
 
     warmup: int = 10
     test: int = 10
@@ -25,7 +26,7 @@ class ASDConfig:
         temperature: float = 0.0
     
     # model path
-    if platform == 'client':
+    if platform == 'server':
         weights_dir: str = '/home/liux/big_file/'
     else:
         weights_dir: str = 'C:/model_file/'

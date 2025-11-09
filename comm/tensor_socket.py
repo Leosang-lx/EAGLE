@@ -129,7 +129,7 @@ class CommZMQ:
         # socket.send_multipart(raw, flags, copy=False)
         socket.send_multipart([header, raw], copy=False)
 
-    def recv_tensor(self, socket: zmq.Socket, device):
+    def recv_tensor(self, socket: zmq.Socket, device=None):
         # header = socket.recv()
         header, raw = socket.recv_multipart()
         tensor_shape, dtype = load_header(header)
@@ -139,6 +139,8 @@ class CommZMQ:
         if tensor_shape:
             arr = arr.reshape(tensor_shape)
         tensor = torch.from_numpy(arr)
+        if device is None:
+            return tensor
         return tensor.to(device)
 
     def close(self):

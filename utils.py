@@ -54,7 +54,7 @@ def prefill_sync(
         token = gen_token(logits=orig[:, -1], logits_processor=logits_processor)
         comm.send_to(token)
 
-        # no return for server
+        return input_ids
 
 def update_inference_inputs(
         input_ids,
@@ -63,7 +63,7 @@ def update_inference_inputs(
         accept_length,
         retrieve_indices,
         logits_processor,
-        new_token,
+        # new_token,
         past_key_values_data_list,
         current_length_data,
         # model,
@@ -72,14 +72,14 @@ def update_inference_inputs(
 ):
     prev_input_len = input_ids.shape[1]
     # Map the best candidate indices to the original indices in the sequence
-    accept_indices = retrieve_indices[best_candidate, : accept_length + 1]
+    accept_indices = retrieve_indices[best_candidate, : accept_length]
     # select_indices = (
     #         retrieve_indices[best_candidate, : accept_length + 1] + prev_input_len
     # )
     select_indices = accept_indices + prev_input_len
     # Append the tokens from the best candidate to the input sequence
     input_ids = torch.cat(
-        [input_ids, candidates[None, best_candidate, : accept_length + 1].to(input_ids.device)], dim=-1
+        [input_ids, candidates[None, best_candidate, : accept_length].to(input_ids.device)], dim=-1
     )
     # Update the past key values based on the selected tokens
     # Source tensor that contains relevant past information based on the selected candidate
@@ -94,7 +94,7 @@ def update_inference_inputs(
     current_length_data.fill_(prev_input_len + tgt.shape[-2])
 
     retrieve_hidden_state_new = hidden_state_new[:, retrieve_indices]
-    accept_hidden_state_new = retrieve_hidden_state_new[:, best_candidate, : accept_length + 1]
+    accept_hidden_state_new = retrieve_hidden_state_new[:, best_candidate, : accept_length]
     # token=model.base_model.lm_head(accept_hidden_state_new[:,-1]).argmax()
     # token=token[None,None]
     # prob = sample_p
@@ -107,9 +107,9 @@ def update_inference_inputs(
     
     next_token = gen_token(prob=sample_p, logits_processor=logits_processor)
 
-    new_token += accept_length + 1
+    # new_token += accept_length + 1
 
-    return accept_indices, input_ids, new_token, None, next_token
+    return accept_indices, input_ids, accept_hidden_state_new, next_token
 
 
 def map_retrieve_indices(retrieve_indices, a, b):
@@ -402,8 +402,8 @@ def get_parent_indices_np(tree_mask):
 def merge_two_tree(
         tree1: Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor],
         tree2: Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor],
-        lens_split,
-        subseq_ri_cum_depths,
+        # lens_split,
+        # subseq_ri_cum_depths,
         prof=None
 ):
     """
@@ -450,6 +450,7 @@ def merge_two_tree(
                 append_indices.append(i)
                 index_mapping_2_to_merged[i] = mapped_idx
 
+    append_length = len(append_indices)
     with prof.time_context(f"merge tokens and positions", cpu=True) if prof is not None else nullcontext():
         append_indices = torch.tensor(append_indices, dtype=torch.long)
         draft_tokens_merged = torch.cat((draft_tokens1, draft_tokens2[:, append_indices]), dim=1)
@@ -506,25 +507,26 @@ def merge_two_tree(
         retrieve_indices_merged = torch.from_numpy(ri_merged)
     # [merge retrieve_indices] finish
 
-    # update lens_split and subseq_ri_cum_depths
-    with prof.time_context(f"update lens_split and subseq_ri_cum_depths", cpu=True) if prof is not None else nullcontext():
-        lens_split = torch.cat((lens_split, torch.tensor([append_indices.size(0)], dtype=torch.long)))
-        # todo: len_split多长？subseq_ri_cum_depths应该多长？
-        n_leaves = retrieve_indices_merged.size(0)
-        subseq_ri_cum_depths = []
-        cum_seq_lens = np.cumsum(lens_split[:-1].numpy(), axis=0)
-        bottom = np.full((n_leaves, 1), -1, dtype=np.int64)
-        retrieve_indices_filled = np.concatenate((retrieve_indices_merged.numpy(), bottom), axis=1)  # add -1 to bottom to prevent overflow
+    # # update lens_split and subseq_ri_cum_depths
+    # with prof.time_context(f"update lens_split and subseq_ri_cum_depths", cpu=True) if prof is not None else nullcontext():
+    #     lens_split = torch.cat((lens_split, torch.tensor([append_indices.size(0)], dtype=torch.long)))
+    #     # todo: len_split多长？subseq_ri_cum_depths应该多长？
+    #     n_leaves = retrieve_indices_merged.size(0)
+    #     subseq_ri_cum_depths = []
+    #     cum_seq_lens = np.cumsum(lens_split[:-1].numpy(), axis=0)
+    #     bottom = np.full((n_leaves, 1), -1, dtype=np.int64)
+    #     retrieve_indices_filled = np.concatenate((retrieve_indices_merged.numpy(), bottom), axis=1)  # add -1 to bottom to prevent overflow
 
-        ri_depth_cum = np.zeros(n_leaves, dtype=np.int64)
-        for i, cum_seq_len in enumerate(cum_seq_lens):
-            for j in range(0 if i == 0 else cum_seq_lens[i - 1], cum_seq_len):
-                row_indices = np.arange(n_leaves, dtype=np.int64)
-                cum_ri_leaves = retrieve_indices_filled[row_indices, ri_depth_cum]
-                ri_depth_cum[cum_ri_leaves == j] += 1
-            # update: 只计算到在pipeline里的draft token tree部分，即将输入的最新一段单独算
-            subseq_ri_cum_depths.append(ri_depth_cum.copy())
-        subseq_ri_cum_depths = np.stack(subseq_ri_cum_depths, axis=0)
+    #     ri_depth_cum = np.zeros(n_leaves, dtype=np.int64)
+    #     for i, cum_seq_len in enumerate(cum_seq_lens):
+    #         for j in range(0 if i == 0 else cum_seq_lens[i - 1], cum_seq_len):
+    #             row_indices = np.arange(n_leaves, dtype=np.int64)
+    #             cum_ri_leaves = retrieve_indices_filled[row_indices, ri_depth_cum]
+    #             ri_depth_cum[cum_ri_leaves == j] += 1
+    #         # update: 只计算到在pipeline里的draft token tree部分，即将输入的最新一段单独算
+    #         subseq_ri_cum_depths.append(ri_depth_cum.copy())
+    #     subseq_ri_cum_depths = np.stack(subseq_ri_cum_depths, axis=0)
     
-    return draft_tokens_merged, retrieve_indices_merged, torch.from_numpy(merged_tree_mask)[None, None], merged_tree_pos_ids, lens_split, torch.from_numpy(subseq_ri_cum_depths)
+    # return draft_tokens_merged, retrieve_indices_merged, torch.from_numpy(merged_tree_mask)[None, None], merged_tree_pos_ids, lens_split, torch.from_numpy(subseq_ri_cum_depths)
+    return draft_tokens_merged, retrieve_indices_merged, torch.from_numpy(merged_tree_mask)[None, None], merged_tree_pos_ids, append_length
 

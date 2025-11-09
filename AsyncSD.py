@@ -19,7 +19,7 @@ from eagle.model.kv_cache import initialize_past_key_values
 # added
 from comm.tensor_socket import CommCS
 from utils import *
-from ASDConfig import config as run_config
+from ASDConfig import config as rconfig
 
 
 def load_draft_model(ea_model_path, dtype=torch.float16, base_model_path=None, device="cuda"):
@@ -115,6 +115,7 @@ class AsyncSDWrapper(nn.Module):
                 eagle3_fc_dict = torch.load(os.path.join(base_model_path, 'eagle3_fc.bin'))
                 self.eagle3_fc = nn.Linear(eagle3_fc_dict["in_dim"], eagle3_fc_dict["out_dim"], bias=False)
                 self.eagle3_fc.weight.data = eagle3_fc_dict["weight"]
+                self.eagle3_fc.to(self.device)
             else:
                 raise NotImplementedError("Only support eagle3 for now")
             
@@ -125,7 +126,6 @@ class AsyncSDWrapper(nn.Module):
             attention_mask=None,
             position_ids=None,
             output_orig=True,
-            mix_hs=False
         ):
         with torch.inference_mode():
             outputs = self.base_model.model(
@@ -139,9 +139,11 @@ class AsyncSDWrapper(nn.Module):
             hidden_states = outputs[0]
             
         # eagle3: mixing multi-layer hidden state and compress for lower transmission
-        if mix_hs:
-            mixed_hidden_state = self.eagle3_fc(hidden_states)
-            return orig, mixed_hidden_state
+        if self.use_eagle3:
+            hidden_states = torch.cat(outputs["hidden_states"], dim=-1)
+            # if mix_hs:
+            hidden_states = self.eagle3_fc(hidden_states)
+            # return orig, mixed_hidden_state
         return orig, hidden_states
     
     def prefill_sync(
@@ -228,7 +230,7 @@ class AsyncSDWrapper(nn.Module):
         if not self.is_server:  # drafter client
             token, mix_hidden_state = prefill_sync(self, input_ids)
         else:  # verifier server
-            prefill_sync(
+            input_ids = prefill_sync(
                 self,
                 past_key_values=past_key_values,
                 logits_processor=logits_processor,
@@ -243,8 +245,8 @@ class AsyncSDWrapper(nn.Module):
                     logits_processor=logits_processor,
                     input_ids=input_ids,
                     token=token,
-                    hidden_state=hidden_state,
-                    next_token=new_token,
+                    mixed_hidden_state=mix_hidden_state,
+                    # next_token=new_token,
                     max_new_tokens=max_new_tokens,
                     max_length=max_length,
                     log=log,
@@ -254,11 +256,12 @@ class AsyncSDWrapper(nn.Module):
                 self.catainfer(
                     kv_cache,
                     logits_processor,
+                    input_ids,
                     prof=prof,
                 )
 
             if not self.is_server:  # drafter client
-                input_ids, hidden_state, next_token, accept_length, turns = outputs
+                input_ids, mix_hidden_state, token, accept_length, turns = outputs
                 new_token += accept_length
                 if log:
                     turns_cnt += turns
@@ -295,7 +298,7 @@ class AsyncSDWrapper(nn.Module):
             input_ids=None,
             token=None,
             mixed_hidden_state=None,
-            new_token=None,
+            # new_token=None,
             max_new_tokens=None,
             max_length=None,
             log=False,
@@ -320,19 +323,20 @@ class AsyncSDWrapper(nn.Module):
                     input_ids_ea,
                     self.ea_layer.lm_head,
                     logits_processor,
-                    total_tokens=run_config.init_total_tokens,
-                    depth=run_config.init_depth,
-                    top_k=run_config.init_top_k,
+                    total_tokens=rconfig.total_token,
+                    depth=rconfig.depth,
+                    top_k=rconfig.top_k,
                     return_last=True,
                     # prof=prof,
                 )
-            if run_config.none_expand:
+            # if rconfig.none_expand:
                 last_ea_tree = (draft_tokens, retrieve_indices, tree_mask, tree_position_ids)
 
             tree_position_ids = tree_position_ids + input_len
             comm.send_to(draft_tokens)
             comm.send_to(tree_mask)
             comm.send_to(tree_position_ids)  # tree_position_ids可能可以直接根据tree_mask得到
+            comm.send_to(retrieve_indices)
         else:  # verifier server
             past_key_values, past_key_values_data, current_length_data = kv_cache
 
@@ -344,23 +348,24 @@ class AsyncSDWrapper(nn.Module):
             # drafter client
             ####################
             if not self.is_server:
+                existing_draft_length = draft_tokens.size(-1)
                 # tree expansion
                 with prof_or_null(f'Drafter: tree_expansion', prof, cpu=False):
 
                     if turn_idx == 0:  # first turn: expand the tree without pruning
-                        draft_tokens2, retrieve_indices2, tree_mask2, tree_position_ids2, last_ea_state = self.ea_layer.expand_last(
+                        draft_tokens, retrieve_indices, tree_mask, tree_position_ids, last_ea_state = self.ea_layer.expand_last(
                             last_ea_tree,
                             last_ea_state,
-                            self.stage_base_model.lm_head,
+                            self.ea_layer.lm_head,
                             logits_processor,
                             device,
-                            expand_depth=run_config.none_expand_depth,
-                            expand_size=run_config.none_expand_size,
-                            return_last=run_config.none_expand,
+                            expand_depth=rconfig.depth,
+                            expand_size=rconfig.expand_size,
+                            # return_last=rconfig.none_expand,  # no need for return_last
                             # prof=prof
                         )
-                        last_ea_tree = (draft_tokens2, retrieve_indices2, tree_mask2, tree_position_ids2)
-                        tree_position_ids2 = tree_position_ids2 + input_ids.size(-1)
+                        # last_ea_tree = (draft_tokens, retrieve_indices, tree_mask, tree_position_ids)
+                        tree_position_ids = tree_position_ids + input_ids.size(-1)
 
                     else:  # following turns: expand the tree based on the latest context
                         # recv the latest context
@@ -393,43 +398,62 @@ class AsyncSDWrapper(nn.Module):
                             input_ids_ea,
                             self.ea_layer.lm_head,
                             logits_processor,
-                            total_tokens=run_config.init_total_tokens,
-                            depth=run_config.init_depth,
-                            top_k=run_config.init_top_k,
+                            total_tokens=rconfig.total_token,
+                            depth=rconfig.depth,
+                            top_k=rconfig.top_k,
                             # return_last=True,
                             prof=prof,
                         )
                         # merge the two draft trees (both roots at the latest context)
-                        draft_tokens, retrieve_indices, tree_mask, tree_position_ids = merge_two_tree(  # todo: fix this
-                            draft_tokens, retrieve_indices, tree_mask, tree_position_ids,
-                            draft_tokens2, retrieve_indices2, tree_mask2, tree_position_ids2
+                        draft_tokens, retrieve_indices, tree_mask, tree_position_ids, appended_length = merge_two_tree(  # todo: fix this
+                            (draft_tokens, retrieve_indices, tree_mask, tree_position_ids),
+                            (draft_tokens2, retrieve_indices2, tree_mask2, tree_position_ids2),
                         )
 
                 # organize newly generated part of draft tokens and send to verifier
-                appended_draft_tokens = ...
-                appended_tree_mask = ...
-                appended_tree_position_ids = ...
+                appended_draft_tokens = draft_tokens[..., existing_draft_length:]
+                appended_tree_mask = tree_mask[..., existing_draft_length:, :]
+                appended_tree_position_ids = tree_position_ids[existing_draft_length:]
 
                 # todo: optimized send_muti() for transmission
-                comm.send_multi([appended_draft_tokens, appended_tree_mask, appended_tree_position_ids, retrieve_indices])
+                # comm.send_multi([appended_draft_tokens, appended_tree_mask, appended_tree_position_ids, retrieve_indices])
+                comm.send_to(appended_draft_tokens)
+                comm.send_to(appended_tree_mask)
+                comm.send_to(appended_tree_position_ids)
+                comm.send_to(retrieve_indices)
                 # explain: verifier requires the retrieve_indices to verify accurate tokens
 
             #####################
             ## verifier server
             #####################
             else:  
-                with prof_or_null(f'Verifer: recv draft', prof, cpu=True):
-                    # todo: optimized recv_muti() for transmission
-                    draft_tokens, tree_mask, tree_position_ids, retrieve_indices = comm.recv_muti()  # maybe retrieve_indices?
-                # todo: check size
-                assert True
+                # with prof_or_null(f'Verifer: recv draft', prof, cpu=True):
+                #     # todo: optimized recv_muti() for transmission
+                #     # draft_tokens, tree_mask, tree_position_ids, retrieve_indices = comm.recv_muti()  # maybe retrieve_indices?
+                #     draft_tokens = comm.recv_from(device=device)
+                #     tree_mask = comm.recv_from(device=device)
+                #     tree_position_ids = comm.recv_from(device=device)
+                #     retrieve_indices = comm.recv_from()
+                # # todo: check size
+                # assert True
 
-                if turn_idx > 0:  # do not check alignment for the first turn
+                if turn_idx == 0:
+                    draft_tokens = comm.recv_from(device=device)
+                    tree_mask = comm.recv_from(device=device)
+                    tree_position_ids = comm.recv_from(device=device)
+                    retrieve_indices = comm.recv_from()
+
+                else:
+                    appended_draft_tokens = comm.recv_from(device=device)
+                    appended_tree_mask = comm.recv_from(device=device)
+                    appended_tree_position_ids = comm.recv_from(device=device)
+                    retrieve_indices = comm.recv_from()
+                    # do not check alignment for the first turn
                     
                     ### todo: check alignment (the new token aligns with the tree)
                     # explain: 当前有前半棵树的验证结果，新采样出的token，以及接收到的后半棵树；以最低开销进行剪枝，去掉新树部分的不合法的节点
 
-                    # merge the newly received tree (todo: this can be down asynchronously)
+                    # merge the newly received tree (TODO: this can be down asynchronously)
                     draft_tokens, tree_mask, tree_position_ids = merge_appended_draft(
                         draft_tokens, tree_mask, tree_position_ids, appended_draft_tokens, appended_tree_mask, appended_tree_position_ids,
                     )
@@ -445,50 +469,56 @@ class AsyncSDWrapper(nn.Module):
                     else:
                         draft_tokens, retrieve_indices, tree_mask, tree_position_ids = pruned_tree
 
+                # last_tree_wo_ri = (draft_tokens, tree_mask, tree_position_ids)
 
-                self.base_model.model.tree_mask = appended_tree_mask
+
+                self.base_model.model.tree_mask = tree_mask
                 ### verifier forward
                 with prof_or_null('Verifier: forward', prof):
                     orig, mixed_hidden_state = self(  # todo: mix hidden_state now or later
-                        appended_draft_tokens,
+                        draft_tokens,
                         past_key_values=past_key_values,
                         position_ids=tree_position_ids,
-                        mix_hidden_state=True,
+                        # mix_hs=True,
                     )
                 
                 # evaluation
                 with prof_or_null('Verifier: evaluation', prof):
                     draft_tokens = torch.cat((draft_tokens, padding), dim=1)
                     candidates = draft_tokens[0, retrieve_indices]
+                    tree_logits = orig[0, retrieve_indices]
                     # verification
                     best_candidate, accept_length, sample_p = evaluate_posterior(
-                        orig, candidates, logits_processor
+                        tree_logits, candidates, logits_processor
                     )
+                    accept_length += 1
                 # next_token = gen_token(prob=sample_p, logits_processor=logits_processor)
                 # Do the following:
                 # - add accepted tokens to input_ids
                 # - sample the new token
                 # - get hidden states of the accepted tokens
-                accept_indices, input_ids, new_token, hidden_states, sample_token = update_inference_inputs(
+                accept_indices, input_ids, hidden_states, sample_token = update_inference_inputs(
                     input_ids,
                     candidates,
                     best_candidate,
                     accept_length,
                     retrieve_indices,
                     logits_processor,
-                    new_token,
+                    # new_token,
                     past_key_values_data,
                     current_length_data,
-                    self,
+                    # self,
                     mixed_hidden_state,
                     sample_p
                 )
 
-                # mixed_hidden_state: compress for lower transmission
-                mixed_hidden_state = self.eagle3_fc[hidden_states]
-                pruning_info = torch.cat((accept_indices, sample_token[None]), dim=0)
+                # mixed_hidden_state: compress for lower transmission; pass self.eagle3_fc in forward in default
+                # mixed_hidden_state = self.eagle3_fc(hidden_states)
+                pruning_info = torch.cat((accept_indices, sample_token.to(accept_indices.device)), dim=0)
                 # send the pruning info (accept_draft_indices + sample_token) and the mixed hidden state to drafter at once after completing verification
-                comm.send_multi((pruning_info, mixed_hidden_state))  # maybe send before update_inference_inputs?
+                # comm.send_multi((pruning_info, mixed_hidden_state))  # maybe send before update_inference_inputs?
+                comm.send_to(pruning_info)
+                comm.send_to(mixed_hidden_state)
 
         if not self.is_server:
             gt_hidden_state = torch.cat(accept_hidden_states, dim=-2)
