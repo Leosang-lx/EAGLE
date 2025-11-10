@@ -3,7 +3,7 @@ from typing import List
 
 @dataclass
 class ASDConfig:
-    platform = 'client'  # 'server' or 'client'
+    platform = 'server'  # 'server' or 'client'
     mode = 'demo'  # 'demo' or 'eval'
     model_name: str = 'llama3.1-8b'
     spec_method: str = 'ea3'  # 'ea' or 'ea3'
@@ -13,13 +13,13 @@ class ASDConfig:
     depth: int = 6
     expand_size: int = 64
 
-    warmup: int = 10
-    test: int = 10
+    warmup: int = 0
+    test: int = 1
 
     max_new_tokens: int = 256
 
     log: bool = True
-    prof: bool = True
+    prof: bool = False
     
     if mode == 'demo':
         your_message: str ='Hello'

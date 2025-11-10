@@ -239,7 +239,7 @@ class AsyncSDWrapper(nn.Module):
 
         ##### async decoding #####
         # outer loop:
-        for round_idx in range(max_length):
+        for round_idx in range(max_new_tokens):
             if log:
                 print(f"Round {round_idx:2d}")
             if not self.is_server:  # drafter client
@@ -261,6 +261,8 @@ class AsyncSDWrapper(nn.Module):
                     input_ids,
                     prof=prof,
                 )
+
+            print(f"Round {round_idx:2d} ends")
 
             if not self.is_server:  # drafter client
                 input_ids, mix_hidden_state, token, accept_length, turns = outputs
@@ -287,7 +289,7 @@ class AsyncSDWrapper(nn.Module):
                 if should_stop.item() == 1:
                     break
         
-        if self.is_draft_stage:
+        if not self.is_server:
             if not log:
                 return input_ids
             else:
@@ -476,13 +478,13 @@ class AsyncSDWrapper(nn.Module):
                     # left_indices: including the newly appended part
                     # left_indices, truncate = cal_pruning_info(draft_tokens, retrieve_indices, best_candidate, accept_length, token, subseq_ri_cum_depths)  # todo: fix this
 
-                    truncate, pruned_tree = verifier_prune_draft(draft_tokens, tree_mask, tree_position_ids, retrieve_indices, best_candidate, accept_indices, sample_token)
+                    truncate, pruned_tree = verifier_prune_draft(draft_tokens, tree_mask, tree_position_ids, retrieve_indices, accept_indices, sample_token)
                     
                     # comm.send_to(left_indices)
                     if truncate:
                         break
                     else:
-                        draft_tokens, retrieve_indices, tree_mask, tree_position_ids = pruned_tree
+                        draft_tokens, tree_mask, tree_position_ids, retrieve_indices = pruned_tree
 
                 # last_tree_wo_ri = (draft_tokens, tree_mask, tree_position_ids)
 
@@ -499,8 +501,8 @@ class AsyncSDWrapper(nn.Module):
                 
                 # evaluation
                 with prof_or_null('Verifier: evaluation', prof):
-                    draft_tokens = torch.cat((draft_tokens, padding), dim=1)
-                    candidates = draft_tokens[0, retrieve_indices]
+                    draft_tokens_pad = torch.cat((draft_tokens, padding), dim=1)
+                    candidates = draft_tokens_pad[0, retrieve_indices]
                     tree_logits = orig[0, retrieve_indices]
                     # verification
                     best_candidate, accept_length, sample_p = evaluate_posterior(
