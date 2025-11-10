@@ -224,13 +224,14 @@ def prune_retrieve_indices(draft_tokens, retrieve_indices, accept_indices, new_t
     return mapped_retrieve_indices, left_draft_indices
  
 
-def verifier_prune_draft(draft_tokens, tree_mask, tree_pos_ids, retrieve_indices, best_candidate, accept_indices, next_token):
+def verifier_prune_draft(draft_tokens, tree_mask, tree_pos_ids, retrieve_indices, accept_indices, next_token):
     accept_len = len(accept_indices)
     # cur_path_depth = (retrieve_indices[best_candidate, :] != -1).sum().item()
-    if accept_len == retrieve_indices.size(-1) or retrieve_indices[best_candidate, accept_len] == -1:
+
+    if accept_len == retrieve_indices.size(-1):
         # reach the leaf node
         return True, None
-    
+        
     # prune retrieve_indices and get left_indices (not including the accept_indices)
     pruned_retrieve_indices, left_draft_indices = prune_retrieve_indices(draft_tokens, retrieve_indices, accept_indices, next_token)
     if pruned_retrieve_indices is None:
@@ -256,7 +257,7 @@ def verifier_prune_draft(draft_tokens, tree_mask, tree_pos_ids, retrieve_indices
     # mapped_retrieve_indices = map_retrieve_indices(left_retrieve_indices, left_draft_indices, left_indices_from_zero)
 
     draft_tokens = draft_tokens[:, left_draft_indices]
-    tree_pos_ids = tree_pos_ids[:, left_draft_indices]
+    tree_pos_ids = tree_pos_ids[left_draft_indices]
     tree_mask = tree_mask[..., left_draft_indices[:, None], left_draft_indices]
 
     return False, (draft_tokens, tree_mask, tree_pos_ids, pruned_retrieve_indices)
