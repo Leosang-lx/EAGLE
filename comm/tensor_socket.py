@@ -59,7 +59,7 @@ def gen_header(tensor: torch.Tensor):
 
 def load_header(header: bytes):
     ndim, d0, d1, d2, d3, dtype_code = struct.unpack('6i', header)
-    assert 0 < ndim <= MAX_DIMS, f"ndim should be in (0, {MAX_DIMS}], got {ndim}"
+    assert 0 < ndim <= MAX_DIMS, f"ndim should be in (0, {MAX_DIMS}], got {ndim}, dims={(d0, d1, d2, d3)}"
     tensor_shape = (d0, d1, d2, d3)[:ndim]
     return tensor_shape, NP_DTYPE_MAP[dtype_code]
 
@@ -88,6 +88,7 @@ def load_tensor(header: bytes, raw: bytes):
     load from transmission
     """
     tensor_shape, dtype = load_header(header)
+    print('Recv tensor with shape', tensor_shape, 'dtype', dtype)
 
     # raw = socket.recv()
     arr = np.frombuffer(raw, dtype=dtype)

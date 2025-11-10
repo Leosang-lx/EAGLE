@@ -369,10 +369,10 @@ def merge_appended_draft(
     assert orig_size + appended_size == full_size, f'Unmatched tree_mask size with tree_mask1 shape: {tree_mask.shape} and tree_mask2 shape: {appended_tree_mask.shape}'
     # merge tree_mask
     merged_tree_mask = torch.zeros(full_size, full_size, dtype=tree_mask.dtype, device=tree_mask.device)
-    merged_tree_mask[orig_size:, orig_size:].copy_(tree_mask, non_blocking=True)
+    merged_tree_mask[:orig_size, :orig_size].copy_(tree_mask[0, 0], non_blocking=True)
     merged_tree_mask[orig_size:, :].copy_(appended_tree_mask[0, 0], non_blocking=True)
 
-    return draft_tokens, merged_tree_mask, tree_pos_ids
+    return draft_tokens, merged_tree_mask[None, None], tree_pos_ids
 
 
 def get_parent_indices_np(tree_mask):
