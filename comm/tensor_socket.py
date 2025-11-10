@@ -14,14 +14,14 @@ import psutil
 DTYPE_MAP = {
     1: torch.int8,
     2: torch.float16,
-    4: torch.int32,
+    4: torch.float32,
     8: torch.int64,
 }
 
 NP_DTYPE_MAP = {
     1: np.int8,
     2: np.float16,
-    4: np.int32,
+    4: np.float32,
     8: np.int64,
 }
 

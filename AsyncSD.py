@@ -197,7 +197,7 @@ class AsyncSDWrapper(nn.Module):
         else:
             logits_processor = None
         
-        should_stop = torch.tensor(0, dtype=torch.int32)
+        should_stop = torch.zeros(1, dtype=torch.int64)
         device = self.device
         comm = self.comm
 
@@ -240,6 +240,8 @@ class AsyncSDWrapper(nn.Module):
         ##### async decoding #####
         # outer loop:
         for round_idx in range(max_length):
+            if log:
+                print(f"Round {round_idx:2d}")
             if not self.is_server:  # drafter client
                 outputs = self.catainfer(
                     logits_processor=logits_processor,
@@ -253,7 +255,7 @@ class AsyncSDWrapper(nn.Module):
                     prof=prof,
                 )
             else:  # verifier server
-                self.catainfer(
+                input_ids = self.catainfer(
                     kv_cache,
                     logits_processor,
                     input_ids,
@@ -268,15 +270,16 @@ class AsyncSDWrapper(nn.Module):
 
                 if input_ids is not None and self.tokenizer is not None:
                     if is_llama3 and stop_token_id in input_ids[0, input_len:].tolist():
-                        should_stop = torch.tensor(1, dtype=torch.int32, device=self.stage_base_model.device)
+                        should_stop = torch.ones(1, dtype=torch.int64)
                     elif self.tokenizer.eos_token_id in input_ids[0, input_len:].tolist():
-                        should_stop = torch.tensor(1, dtype=torch.int32, device=self.stage_base_model.device)
+                        should_stop = torch.ones(1, dtype=torch.int64)
                     elif new_token > max_new_tokens:
-                        should_stop = torch.tensor(1, dtype=torch.int32, device=self.stage_base_model.device)
+                        should_stop = torch.ones(1, dtype=torch.int64)
                     elif input_ids.shape[1] > max_length:
-                        should_stop = torch.tensor(1, dtype=torch.int32, device=self.stage_base_model.device)
+                        should_stop = torch.ones(1, dtype=torch.int64)
                     
-                    comm.send_to(should_stop, src=0)
+                    comm.send_to(should_stop)
+                    print('Send should_stop', should_stop)
                     if should_stop.item() == 1:
                         break
             else:
@@ -312,7 +315,7 @@ class AsyncSDWrapper(nn.Module):
 
         # drafter initialization
         if not self.is_server:  # drafter client
-            accept_hidden_states = []
+            # accept_hidden_states = []
             accept_length_this_round = 0
             input_ids_ea = torch.cat((input_ids, token.to(input_ids.device)), dim=1)
             input_len = input_ids.size(-1)
@@ -369,19 +372,31 @@ class AsyncSDWrapper(nn.Module):
 
                     else:  # following turns: expand the tree based on the latest context
                         # recv the latest context
-                        pruning_info, mixed_hidden_state = comm.recv_multi(device)
-                        # pruning based on the latest context first
-                        accept_tokens, truncate, pruned_tree = drafter_prune_draft(  # todo: fix this
-                            pruning_info,
-                            last_ea_tree
+                        # pruning_info, mixed_hidden_state = comm.recv_multi(device)
+                        pruning_info = comm.recv_from()
+                        mixed_hidden_state = comm.recv_from(device=device)  
+
+                        accepted_indices = pruning_info[:-1]
+                        next_token_id = pruning_info[-1]
+                        accept_tokens = draft_tokens[:, accepted_indices]
+                                              # pruning based on the latest context first
+                        truncate, pruned_tree = drafter_prune_draft(  # todo: fix this
+                            pruning_info[:-1],  # accept_indices,
+                            pruning_info[-1],  # next_token_id
+                            draft_tokens,
+                            tree_mask,
+                            tree_position_ids,
+                            retrieve_indices,
                         )
                         input_ids = torch.cat((input_ids, accept_tokens.to(input_ids.device)), dim=-1)
-                        new_sample_token = pruning_info[0].item()
-                        token = torch.tensor([[new_sample_token]], device=input_ids.device)
+                        # new_sample_token = pruning_info[0].item()
+                        token = torch.tensor([[next_token_id]], device=input_ids.device)
 
                         if truncate:  # drafter breaks the loop in the next iteration when verifier truncates
-                            accept_hidden_states.append(mixed_hidden_state)
+                            # accept_hidden_states.append(mixed_hidden_state)
                             break
+                        
+                        draft_tokens, tree_mask, tree_position_ids, retrieve_indices = pruned_tree
 
                         input_ids_ea = torch.cat((input_ids, token), dim=-1)
                         # prune the newly generated draft based on the latest context
@@ -521,8 +536,11 @@ class AsyncSDWrapper(nn.Module):
                 comm.send_to(mixed_hidden_state)
 
         if not self.is_server:
-            gt_hidden_state = torch.cat(accept_hidden_states, dim=-2)
-            return input_ids, gt_hidden_state, token, accept_length_this_round, turn_idx + 1
+            # gt_hidden_state = torch.cat(accept_hidden_states, dim=-2)
+            # return input_ids, gt_hidden_state, token, accept_length_this_round, turn_idx + 1
+            return input_ids, mixed_hidden_state, token, accept_length_this_round, turn_idx + 1
+        else:
+            return input_ids
 
 
 

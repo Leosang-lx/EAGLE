@@ -260,14 +260,14 @@ def verifier_prune_draft(draft_tokens, tree_mask, tree_pos_ids, retrieve_indices
     return False, (draft_tokens, tree_mask, tree_pos_ids, pruned_retrieve_indices)
 
 
-def drafter_prune_draft(draft_tokens, tree_mask, tree_pos_ids, retrieve_indices, accept_indices, next_token):
+def drafter_prune_draft(accept_indices, next_token_id, draft_tokens, tree_mask, tree_pos_ids, retrieve_indices):
     # fixme: when the accepted tokens reach the leaf node
-    pruned_retrieve_indices, left_draft_indices = prune_retrieve_indices(draft_tokens, retrieve_indices, accept_indices, next_token)
+    pruned_retrieve_indices, left_draft_indices = prune_retrieve_indices(draft_tokens, retrieve_indices, accept_indices, next_token_id)
     if pruned_retrieve_indices is None:
         return True, None
     
     draft_tokens = draft_tokens[:, left_draft_indices]
-    tree_pos_ids = tree_pos_ids[:, left_draft_indices]
+    tree_pos_ids = tree_pos_ids[left_draft_indices]
     tree_mask = tree_mask[..., left_draft_indices[:, None], left_draft_indices]
     return False, (draft_tokens, tree_mask, tree_pos_ids, pruned_retrieve_indices)
 
