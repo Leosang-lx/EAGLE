@@ -203,6 +203,8 @@ def prune_retrieve_indices(draft_tokens, retrieve_indices, accept_indices, new_t
     return [the pruned and processed (mapping to indices starts from zero)] and [the left indices]
     """
     accept_len = len(accept_indices)
+    if accept_len == retrieve_indices.size(-1):
+        return None, None
     matched_candidates = find_prefix_match(retrieve_indices, accept_indices)
     next_indices_draft = retrieve_indices[matched_candidates, accept_len]
     next_tokens_draft = draft_tokens[0, next_indices_draft]
@@ -213,7 +215,7 @@ def prune_retrieve_indices(draft_tokens, retrieve_indices, accept_indices, new_t
         return None, None
 
     left_candidates = matched_candidates[same_indices]
-    left_retrieve_indices = retrieve_indices[left_candidates, accept_len + 1:]
+    left_retrieve_indices = retrieve_indices[left_candidates, accept_len:]
     left_draft_indices = process_retrieve_indices(left_retrieve_indices)
 
     left_indices_from_zero = torch.arange(left_draft_indices.size(-1), dtype=torch.long)

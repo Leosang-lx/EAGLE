@@ -88,7 +88,7 @@ def load_tensor(header: bytes, raw: bytes):
     load from transmission
     """
     tensor_shape, dtype = load_header(header)
-    print('Recv tensor with shape', tensor_shape, 'dtype', dtype)
+    # print('Recv tensor with shape', tensor_shape, 'dtype', dtype)
 
     # raw = socket.recv()
     arr = np.frombuffer(raw, dtype=dtype)

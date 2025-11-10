@@ -79,15 +79,16 @@ def main():
             )
     
     # [test generation]
-    cnt = tqdm(range(rconfig.num), desc='Test') if not is_server else range(rconfig.num)
+    profiler = prof if rconfig.prof else None
+    cnt = tqdm(range(rconfig.test), desc='Test') if not is_server else range(rconfig.test)
     for i in cnt:
         name = 'SERVER' if is_server else 'CLIENT'
-        with prof_or_null(f'{name} co_generate', prof):
+        with prof_or_null(f'{name} co_generate', profiler):
             outputs = run(
                 asd_model,
                 input_ids if not is_server else None,
                 rconfig.log if not is_server else False,
-                rconfig.prof
+                profiler,
             )
     # [show]
     if not is_server:

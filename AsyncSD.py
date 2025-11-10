@@ -239,7 +239,7 @@ class AsyncSDWrapper(nn.Module):
 
         ##### async decoding #####
         # outer loop:
-        for round_idx in range(max_length):
+        for round_idx in range(max_new_tokens):
             if log:
                 print(f"Round {round_idx:2d}")
             if not self.is_server:  # drafter client
@@ -262,6 +262,8 @@ class AsyncSDWrapper(nn.Module):
                     prof=prof,
                 )
 
+            print(f"Round {round_idx:2d} ends")
+
             if not self.is_server:  # drafter client
                 input_ids, mix_hidden_state, token, accept_length, turns = outputs
                 new_token += accept_length
@@ -278,16 +280,16 @@ class AsyncSDWrapper(nn.Module):
                     elif input_ids.shape[1] > max_length:
                         should_stop = torch.ones(1, dtype=torch.int64)
                     
-                    comm.send_to(should_stop)
-                    print('Send should_stop', should_stop)
-                    if should_stop.item() == 1:
-                        break
+                comm.send_to(should_stop)
+                print('Send should_stop', should_stop)
+                if should_stop.item() == 1:
+                    break
             else:
                 should_stop = comm.recv_from()
                 if should_stop.item() == 1:
                     break
         
-        if self.is_draft_stage:
+        if not self.is_server:
             if not log:
                 return input_ids
             else:
@@ -351,11 +353,11 @@ class AsyncSDWrapper(nn.Module):
             # drafter client
             ####################
             if not self.is_server:
-                existing_draft_length = draft_tokens.size(-1)
                 # tree expansion
                 with prof_or_null(f'Drafter: tree_expansion', prof, cpu=False):
 
                     if turn_idx == 0:  # first turn: expand the tree without pruning
+                        existing_draft_length = draft_tokens.size(-1)
                         draft_tokens, retrieve_indices, tree_mask, tree_position_ids, last_ea_state = self.ea_layer.expand_last(
                             last_ea_tree,
                             last_ea_state,
@@ -397,6 +399,7 @@ class AsyncSDWrapper(nn.Module):
                             break
                         
                         draft_tokens, tree_mask, tree_position_ids, retrieve_indices = pruned_tree
+                        existing_draft_length = draft_tokens.size(-1)
 
                         input_ids_ea = torch.cat((input_ids, token), dim=-1)
                         # prune the newly generated draft based on the latest context
@@ -424,6 +427,8 @@ class AsyncSDWrapper(nn.Module):
                             (draft_tokens, retrieve_indices, tree_mask, tree_position_ids),
                             (draft_tokens2, retrieve_indices2, tree_mask2, tree_position_ids2),
                         )
+                        print('Appended draft length:', appended_length)
+                print('Existing draft length:', existing_draft_length)
 
                 # organize newly generated part of draft tokens and send to verifier
                 appended_draft_tokens = draft_tokens[..., existing_draft_length:]
@@ -432,6 +437,15 @@ class AsyncSDWrapper(nn.Module):
 
                 # todo: optimized send_muti() for transmission
                 # comm.send_multi([appended_draft_tokens, appended_tree_mask, appended_tree_position_ids, retrieve_indices])
+                try:
+                    assert 0 not in appended_draft_tokens.shape
+                except:
+                    print('append_draft_tokens', appended_draft_tokens.shape)
+                    print('appended_tree_mask', appended_tree_mask.shape)
+                    print('appended_tree_position_ids', appended_tree_position_ids.shape)
+                    print('retrieve_indices', retrieve_indices.shape)
+                    raise
+
                 comm.send_to(appended_draft_tokens)
                 comm.send_to(appended_tree_mask)
                 comm.send_to(appended_tree_position_ids)
