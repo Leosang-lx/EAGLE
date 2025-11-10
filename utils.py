@@ -227,10 +227,6 @@ def prune_retrieve_indices(draft_tokens, retrieve_indices, accept_indices, new_t
 def verifier_prune_draft(draft_tokens, tree_mask, tree_pos_ids, retrieve_indices, accept_indices, next_token):
     accept_len = len(accept_indices)
     # cur_path_depth = (retrieve_indices[best_candidate, :] != -1).sum().item()
-
-    if accept_len == retrieve_indices.size(-1):
-        # reach the leaf node
-        return True, None
         
     # prune retrieve_indices and get left_indices (not including the accept_indices)
     pruned_retrieve_indices, left_draft_indices = prune_retrieve_indices(draft_tokens, retrieve_indices, accept_indices, next_token)
