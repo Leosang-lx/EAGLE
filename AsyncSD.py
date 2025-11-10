@@ -253,7 +253,7 @@ class AsyncSDWrapper(nn.Module):
                     prof=prof,
                 )
             else:  # verifier server
-                self.catainfer(
+                input_ids = self.catainfer(
                     kv_cache,
                     logits_processor,
                     input_ids,
@@ -497,7 +497,7 @@ class AsyncSDWrapper(nn.Module):
                 # - add accepted tokens to input_ids
                 # - sample the new token
                 # - get hidden states of the accepted tokens
-                accept_indices, input_ids, hidden_states, sample_token = update_inference_inputs(
+                accept_indices, input_ids, accept_hidden_state, sample_token = update_inference_inputs(
                     input_ids,
                     candidates,
                     best_candidate,
@@ -518,11 +518,13 @@ class AsyncSDWrapper(nn.Module):
                 # send the pruning info (accept_draft_indices + sample_token) and the mixed hidden state to drafter at once after completing verification
                 # comm.send_multi((pruning_info, mixed_hidden_state))  # maybe send before update_inference_inputs?
                 comm.send_to(pruning_info)
-                comm.send_to(mixed_hidden_state)
+                comm.send_to(accept_hidden_state)
 
         if not self.is_server:
             gt_hidden_state = torch.cat(accept_hidden_states, dim=-2)
             return input_ids, gt_hidden_state, token, accept_length_this_round, turn_idx + 1
+        else:
+            return input_ids
 
 
 
