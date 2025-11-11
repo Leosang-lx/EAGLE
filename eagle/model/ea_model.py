@@ -19,6 +19,7 @@ from .kv_cache import initialize_past_key_values
 from .cnets import Model
 from .cnets1 import Model as Model1
 from .configs import EConfig
+from utils import prof_or_null
 
 
 class EaModel(nn.Module):
@@ -201,7 +202,7 @@ class EaModel(nn.Module):
             max_length=2048,
             log=False,
             is_llama3=False,
-
+            prof=None,
     ):
         if is_llama3:
             stop_token_id = self.tokenizer.convert_tokens_to_ids("<|eot_id|>")
@@ -239,7 +240,7 @@ class EaModel(nn.Module):
         reset_tree_mode(self)
         # prefill
         draft_tokens, retrieve_indices, tree_mask, tree_position_ids, logits, hidden_state, sample_token = initialize_tree(
-            input_ids, self, past_key_values, logits_processor
+            input_ids, self, past_key_values, logits_processor, prof=prof
         )
         new_token = 0
         max_length = max_length - self.ea_layer.total_tokens - 10
@@ -249,14 +250,15 @@ class EaModel(nn.Module):
 
             draft_tokens = draft_tokens.to(input_ids.device)
             # Target model forward, get logits
-            logits, hidden_state_new, outputs = tree_decoding(
-                self,
-                draft_tokens,
-                past_key_values,
-                tree_position_ids,
-                input_ids,
-                retrieve_indices,
-            )
+            with prof_or_null('Target forward', prof):
+                logits, hidden_state_new, outputs = tree_decoding(
+                    self,
+                    draft_tokens,
+                    past_key_values,
+                    tree_position_ids,
+                    input_ids,
+                    retrieve_indices,
+                )
             # retrieve_indices=tree_buffers["retrieve_indices"]
             # logits = logits[0, retrieve_indices]
             draft_tokens = torch.cat((draft_tokens, padding), dim=1)
@@ -279,7 +281,8 @@ class EaModel(nn.Module):
                 current_length_data,
                 self,
                 hidden_state_new,
-                sample_p
+                sample_p,
+                prof=prof,
             )
 
             if is_llama3:

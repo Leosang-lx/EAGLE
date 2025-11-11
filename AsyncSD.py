@@ -227,17 +227,18 @@ class AsyncSDWrapper(nn.Module):
             reset_tree_mode(self)
 
         ##### sync prefill #####
-        if not self.is_server:  # drafter client
-            token, mix_hidden_state = prefill_sync(self, input_ids)
-            if log:
-                print(f'First token: {token}, hidden_state: {mix_hidden_state.shape}')
-        else:  # verifier server
-            input_ids = prefill_sync(
-                self,
-                past_key_values=past_key_values,
-                logits_processor=logits_processor,
-            )
-            kv_cache = (past_key_values, past_key_values_data, current_length_data)
+        with prof_or_null("prefill", prof):
+            if not self.is_server:  # drafter client
+                token, mix_hidden_state = prefill_sync(self, input_ids)
+                if log:
+                    print(f'First token: {token}, hidden_state: {mix_hidden_state.shape}')
+            else:  # verifier server
+                input_ids = prefill_sync(
+                    self,
+                    past_key_values=past_key_values,
+                    logits_processor=logits_processor,
+                )
+                kv_cache = (past_key_values, past_key_values_data, current_length_data)
 
         ##### async decoding #####
         # outer loop:
