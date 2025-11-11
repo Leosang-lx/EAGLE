@@ -1119,7 +1119,7 @@ class Model(nn.Module):
 
         rid = 0
         position_ids_list = tree_position_ids.tolist()
-        tree_position_ids = torch.from_numpy(tree_position_ids[inv_indices])
+        tree_position_ids = torch.tensor(tree_position_ids[inv_indices], dtype=torch.long)
 
         assert torch.equal(tree_position_ids[:last_size], last_tree_position_ids)
 

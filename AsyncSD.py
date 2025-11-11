@@ -229,6 +229,8 @@ class AsyncSDWrapper(nn.Module):
         ##### sync prefill #####
         if not self.is_server:  # drafter client
             token, mix_hidden_state = prefill_sync(self, input_ids)
+            if log:
+                print(f'First token: {token}, hidden_state: {mix_hidden_state.shape}')
         else:  # verifier server
             input_ids = prefill_sync(
                 self,
@@ -261,8 +263,6 @@ class AsyncSDWrapper(nn.Module):
                     input_ids,
                     prof=prof,
                 )
-
-            print(f"Round {round_idx:2d} ends")
 
             if not self.is_server:  # drafter client
                 input_ids, mix_hidden_state, token, accept_length, turns = outputs
@@ -349,10 +349,18 @@ class AsyncSDWrapper(nn.Module):
         turn_idx = -1
         while True:
             turn_idx += 1
+            if log:
+                print(f"Turn {turn_idx:2d}")
             ####################
             # drafter client
             ####################
             if not self.is_server:
+                # if log:
+                #     print(f'draft_tokens: {draft_tokens.shape}\n{draft_tokens}')
+                #     print(f'retrieve_indices: {retrieve_indices.shape}\n{retrieve_indices}')
+                #     print(f'tree_mask: {tree_mask.shape}\n{tree_mask}')
+                #     print(f'tree_position_ids: {tree_position_ids.shape}\n{tree_position_ids}')
+
                 # tree expansion
                 with prof_or_null(f'Drafter: tree_expansion', prof, cpu=False):
 
@@ -377,9 +385,13 @@ class AsyncSDWrapper(nn.Module):
                         # pruning_info, mixed_hidden_state = comm.recv_multi(device)
                         pruning_info = comm.recv_from()
                         mixed_hidden_state = comm.recv_from(device=device)  
+                        accept_len = pruning_info.size(-1) - 1
+                        accept_length_this_round += accept_len
 
                         accepted_indices = pruning_info[:-1]
                         next_token_id = pruning_info[-1]
+                        if log:
+                            print(f'accept_length: {accept_len}')
                         accept_tokens = draft_tokens[:, accepted_indices]
                                               # pruning based on the latest context first
                         truncate, pruned_tree = drafter_prune_draft(  # todo: fix this
@@ -427,8 +439,8 @@ class AsyncSDWrapper(nn.Module):
                             (draft_tokens, retrieve_indices, tree_mask, tree_position_ids),
                             (draft_tokens2, retrieve_indices2, tree_mask2, tree_position_ids2),
                         )
-                        print('Appended draft length:', appended_length)
-                print('Existing draft length:', existing_draft_length)
+                #         print('Appended draft length:', appended_length)
+                # print('Existing draft length:', existing_draft_length)
 
                 # organize newly generated part of draft tokens and send to verifier
                 appended_draft_tokens = draft_tokens[..., existing_draft_length:]

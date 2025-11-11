@@ -3,7 +3,7 @@ from typing import List
 
 @dataclass
 class ASDConfig:
-    platform = 'server'  # 'server' or 'client'
+    platform = 'client'  # 'server' or 'client'
     mode = 'demo'  # 'demo' or 'eval'
     model_name: str = 'llama3.1-8b'
     spec_method: str = 'ea3'  # 'ea' or 'ea3'
@@ -22,7 +22,7 @@ class ASDConfig:
     prof: bool = False
     
     if mode == 'demo':
-        your_message: str ='Hello'
+        your_message: str ='Who are you?'
         temperature: float = 0.0
     
     # model path
