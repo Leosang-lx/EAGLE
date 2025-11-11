@@ -13,7 +13,7 @@ class ASDConfig:
     depth: int = 6
     expand_size: int = 64
 
-    warmup: int = 0
+    warmup: int = 10
     test: int = 1
 
     max_new_tokens: int = 256
@@ -22,7 +22,7 @@ class ASDConfig:
     prof: bool = False
     
     if mode == 'demo':
-        your_message: str ='Hello'
+        your_message: str ='Who are you?'
         temperature: float = 0.0
     
     # model path

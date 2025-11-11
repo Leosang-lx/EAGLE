@@ -30,7 +30,7 @@ class Profiler:
         Start recording time for a named section. Supports multiple starts.
         """
 
-        self.start_tag = 'pipeline' in name
+        self.start_tag = 'generate' in name
         if self.start_tag:
             self.cumulative_time_events.append(
                 {

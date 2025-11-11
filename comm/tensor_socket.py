@@ -75,7 +75,10 @@ def serialize_tensor(tensor: torch.Tensor):
 
     if tensor.device.type == 'cuda':
         tensor_pinned = torch.empty_like(tensor, device='cpu', pin_memory=True)
+        event = torch.cuda.Event()
         tensor_pinned.copy_(tensor, non_blocking=True)
+        event.record()
+        event.synchronize()
         raw = tensor_pinned.numpy().tobytes()  # 隐式同步
         # raw = tensor.cpu().numpy().tobytes()
     else:
