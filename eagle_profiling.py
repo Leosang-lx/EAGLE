@@ -92,12 +92,12 @@ if profile_eagle3:
     for _ in tqdm(range(warmup_repeat), desc="warm up"):
         ea_layer.reset()
         ea_layer.reset_kv()
-        _ = ea_layer.topK_genrate(hidden_state, input_ids, None, None)
+        _ = ea_layer.topK_genrate_new(hidden_state, input_ids, None, None)
 
     for _ in tqdm(range(test_repeat)):
         ea_layer.reset()
         ea_layer.reset_kv()
-        with prof.profile_context('topK_genrate pipeline', cpu=False):
-            _ = ea_layer.topK_genrate(hidden_state, input_ids, None, None, prof=prof)
+        with prof.profile_context('topK_genrate_new pipeline', cpu=False):
+            _ = ea_layer.topK_genrate_new(hidden_state, input_ids, None, None, prof=prof)
 
     prof.print_all_elapsed_times()

@@ -261,6 +261,7 @@ class AsyncSDWrapper(nn.Module):
                     kv_cache,
                     logits_processor,
                     input_ids,
+                    log=log,
                     prof=prof,
                 )
 
@@ -322,8 +323,8 @@ class AsyncSDWrapper(nn.Module):
             input_ids_ea = torch.cat((input_ids, token.to(input_ids.device)), dim=1)
             input_len = input_ids.size(-1)
 
-            with prof.time_context(f'Drafter: topK_genrate', cpu=False) if prof is not None else nullcontext():
-                draft_tokens, retrieve_indices, tree_mask, tree_position_ids, last_ea_state = self.ea_layer.topK_genrate(
+            with prof.time_context(f'Drafter: topK_genrate_new', cpu=False) if prof is not None else nullcontext():
+                draft_tokens, retrieve_indices, tree_mask, tree_position_ids, last_ea_state = self.ea_layer.topK_genrate_new(
                     mixed_hidden_state,
                     input_ids_ea,
                     self.ea_layer.lm_head,
@@ -417,13 +418,13 @@ class AsyncSDWrapper(nn.Module):
                         # prune the newly generated draft based on the latest context
                         # draft_tokens, retrieve_indices, tree_mask, tree_position_ids = self.ea_layer
 
-                        # draft_tokens2, retrieve_indices2, tree_mask2, tree_position_ids2 = self.ea_layer.topK_genrate(
+                        # draft_tokens2, retrieve_indices2, tree_mask2, tree_position_ids2 = self.ea_layer.topK_genrate_new(
                         #     mixed_hidden_state,
                         #     input_ids_ea
                         # )  # todo: fix this
 
                         # generate a new draft tree based on the latest context
-                        draft_tokens2, retrieve_indices2, tree_mask2, tree_position_ids2, _ = self.ea_layer.topK_genrate(
+                        draft_tokens2, retrieve_indices2, tree_mask2, tree_position_ids2, _ = self.ea_layer.topK_genrate_new(
                             mixed_hidden_state,
                             input_ids_ea,
                             self.ea_layer.lm_head,
@@ -483,12 +484,24 @@ class AsyncSDWrapper(nn.Module):
                     tree_mask = comm.recv_from(device=device)
                     tree_position_ids = comm.recv_from(device=device)
                     retrieve_indices = comm.recv_from()
+                    
+                    # assert draft_tokens.dtype == torch.int64
+                    # assert tree_mask.dtype == torch.float32
+                    # assert tree_position_ids.dtype == torch.int64
+                    # assert retrieve_indices.dtype == torch.int64
+                    # assert torch.min(tree_position_ids) != 0
 
                 else:
                     appended_draft_tokens = comm.recv_from(device=device)
                     appended_tree_mask = comm.recv_from(device=device)
                     appended_tree_position_ids = comm.recv_from(device=device)
                     retrieve_indices = comm.recv_from()
+
+                    # assert appended_draft_tokens.dtype == torch.int64
+                    # assert appended_tree_mask.dtype == torch.float32
+                    # assert appended_tree_position_ids.dtype == torch.int64
+                    # assert retrieve_indices.dtype == torch.int64
+                    # assert torch.min(appended_tree_position_ids) != 0
                     # do not check alignment for the first turn
                     
                     ### todo: check alignment (the new token aligns with the tree)
@@ -512,6 +525,11 @@ class AsyncSDWrapper(nn.Module):
 
                 # last_tree_wo_ri = (draft_tokens, tree_mask, tree_position_ids)
 
+                # if log:
+                #     print(f'draft_tokens: {draft_tokens.shape}\n{draft_tokens}')
+                #     print(f'retrieve_indices: {retrieve_indices.shape}\n{retrieve_indices}')
+                #     print(f'tree_mask: {tree_mask.shape}\n{tree_mask}')
+                #     print(f'tree_position_ids: {tree_position_ids.shape}\n{tree_position_ids}')
 
                 self.base_model.model.tree_mask = tree_mask
                 ### verifier forward
@@ -533,6 +551,8 @@ class AsyncSDWrapper(nn.Module):
                         tree_logits, candidates, logits_processor
                     )
                     accept_length += 1
+                if log:
+                    print(f'accept_length: {accept_length}')
                 # next_token = gen_token(prob=sample_p, logits_processor=logits_processor)
                 # Do the following:
                 # - add accepted tokens to input_ids
