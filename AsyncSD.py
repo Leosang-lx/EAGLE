@@ -263,7 +263,7 @@ class AsyncSDWrapper(nn.Module):
             if not log:
                 return input_ids
             else:
-                return input_ids, new_token, round_idx, turns_cnt
+                return input_ids, new_token, round_idx + 1, turns_cnt
 
 
     def catainfer(
@@ -412,7 +412,7 @@ class AsyncSDWrapper(nn.Module):
                             depth=rconfig.depth,
                             top_k=rconfig.top_k,
                             # return_last=True,
-                            prof=prof,
+                            # prof=prof,
                         )
                         tree_position_ids2 = tree_position_ids2 + input_ids.size(-1)
                         # merge the two draft trees (both roots at the latest context)
