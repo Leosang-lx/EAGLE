@@ -13,7 +13,7 @@ class ASDConfig:
     depth: int = 6
     expand_size: int = 64
 
-    warmup: int = 0
+    warmup: int = 10
     test: int = 1
 
     max_new_tokens: int = 256
