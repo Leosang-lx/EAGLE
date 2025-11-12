@@ -3,7 +3,7 @@ from typing import List
 
 @dataclass
 class ASDConfig:
-    platform = 'client'  # 'server' or 'client'
+    platform = 'server'  # 'server' or 'client'
     mode = 'demo'  # 'demo' or 'eval'
     model_name: str = 'llama3.1-8b'
     spec_method: str = 'ea3'  # 'ea' or 'ea3'
