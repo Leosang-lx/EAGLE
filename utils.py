@@ -9,9 +9,6 @@ def save_as(obj, fname):
     with open(fname, 'wb') as f:
         pl.dump(obj, f)
 
-def load_from(fname):
-    return pl.load(fname)
-
 def is_strictly_ascending(arr):
     return all(arr[i] < arr[i+1] for i in range(len(arr)-1))
 
