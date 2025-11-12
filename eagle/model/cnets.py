@@ -682,7 +682,7 @@ class Model(nn.Module):
         self.stable_kv = None
 
     @torch.no_grad()
-    def topK_genrate(self, hidden_states, input_ids, head, logits_processor):
+    def topK_genrate(self, hidden_states, input_ids, head, logits_processor, prof=None):
 
         input_ids = input_ids.to(hidden_states.device)
         total_tokens = self.total_tokens
@@ -1057,7 +1057,7 @@ class Model(nn.Module):
         retrieve_indices = torch.tensor(retrieve_indices, dtype=torch.long)
         draft_tokens = torch.tensor(draft_tokens, dtype=torch.long)
         tree_mask = torch.tensor(tree_mask, dtype=torch.float)
-        tree_position_ids = torch.tensor(tree_position_ids, dtype=torch.long).to(hidden_states.device)
+        tree_position_ids = torch.tensor(tree_position_ids, dtype=torch.long)
 
         del mask_index, mask_index_list, noleaf_index, noleaf_num, leaf_num, max_depth, rid
         # tree_position_ids = tree_position_ids.to(hidden_states.device)

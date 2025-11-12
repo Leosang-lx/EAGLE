@@ -267,6 +267,7 @@ class EaModel(nn.Module):
             best_candidate, accept_length, sample_p = evaluate_posterior(
                 logits, candidates, logits_processor
             )
+            input_len = input_ids.size(-1)
             # print(accept_length)
             # Adjusting the input sequence, draft model forward
             input_ids, draft_tokens, retrieve_indices, tree_mask, tree_position_ids, new_token, hidden_state, sample_token = update_inference_inputs(
@@ -284,6 +285,9 @@ class EaModel(nn.Module):
                 sample_p,
                 prof=prof,
             )
+            if log:
+                accept_tokens = input_ids[0, input_len:]
+                print(f'accept_tokens: {accept_tokens.tolist()}, token: {sample_token[0].tolist()}')
 
             if is_llama3:
                 if stop_token_id in input_ids[0, input_len:].tolist():

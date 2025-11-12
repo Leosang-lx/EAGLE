@@ -19,7 +19,7 @@ class ASDConfig:
     max_new_tokens: int = 256
 
     log: bool = True
-    prof: bool = False
+    prof: bool = True
     
     if mode == 'demo':
         your_message: str ='Who are you?'

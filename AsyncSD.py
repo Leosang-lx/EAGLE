@@ -74,7 +74,6 @@ class AsyncSDWrapper(nn.Module):
         self.base_model_name_or_path = base_model_path
         self.tokenizer = AutoTokenizer.from_pretrained(base_model_path, use_fast=False)
 
-        # first init comm handler
         if init_comm:
             assert server_ip is not None
             self.comm = CommCS(server_ip=server_ip)
@@ -469,7 +468,7 @@ class AsyncSDWrapper(nn.Module):
             #####################
             ## verifier server
             #####################
-            else:  
+            else:
                 # with prof_or_null(f'Verifer: recv draft', prof, cpu=True):
                 #     # todo: optimized recv_muti() for transmission
                 #     # draft_tokens, tree_mask, tree_position_ids, retrieve_indices = comm.recv_muti()  # maybe retrieve_indices?
@@ -481,10 +480,11 @@ class AsyncSDWrapper(nn.Module):
                 # assert True
 
                 if turn_idx == 0:
-                    draft_tokens = comm.recv_from(device=device)
-                    tree_mask = comm.recv_from(device=device)
-                    tree_position_ids = comm.recv_from(device=device)
-                    retrieve_indices = comm.recv_from()
+                    with prof_or_null('Verifer: recv_from', prof, cpu=True):
+                        draft_tokens = comm.recv_from(device=device)
+                        tree_mask = comm.recv_from(device=device)
+                        tree_position_ids = comm.recv_from(device=device)
+                        retrieve_indices = comm.recv_from()
                     
                     # assert draft_tokens.dtype == torch.int64
                     # assert tree_mask.dtype == torch.float32
@@ -493,10 +493,11 @@ class AsyncSDWrapper(nn.Module):
                     # assert torch.min(tree_position_ids) != 0
 
                 else:
-                    appended_draft_tokens = comm.recv_from(device=device)
-                    appended_tree_mask = comm.recv_from(device=device)
-                    appended_tree_position_ids = comm.recv_from(device=device)
-                    retrieve_indices = comm.recv_from()
+                    with prof_or_null('Verifer: recv_from', prof, cpu=True):
+                        appended_draft_tokens = comm.recv_from(device=device)
+                        appended_tree_mask = comm.recv_from()
+                        appended_tree_position_ids = comm.recv_from(device=device)
+                        retrieve_indices = comm.recv_from()
 
                     # assert appended_draft_tokens.dtype == torch.int64
                     # assert appended_tree_mask.dtype == torch.float32
@@ -507,7 +508,8 @@ class AsyncSDWrapper(nn.Module):
                     
                     ### todo: check alignment (the new token aligns with the tree)
                     # explain: 当前有前半棵树的验证结果，新采样出的token，以及接收到的后半棵树；以最低开销进行剪枝，去掉新树部分的不合法的节点
-
+                    if turn_idx == 2:
+                        z = 1
                     # merge the newly received tree (TODO: this can be down asynchronously)
                     draft_tokens, tree_mask, tree_position_ids = merge_appended_draft(
                         draft_tokens, tree_mask, tree_position_ids, appended_draft_tokens, appended_tree_mask, appended_tree_position_ids,
@@ -541,7 +543,7 @@ class AsyncSDWrapper(nn.Module):
                         position_ids=tree_position_ids,
                         # mix_hs=True,
                     )
-                
+
                 # evaluation
                 with prof_or_null('Verifier: evaluation', prof):
                     draft_tokens_pad = torch.cat((draft_tokens, padding), dim=1)
@@ -552,8 +554,7 @@ class AsyncSDWrapper(nn.Module):
                         tree_logits, candidates, logits_processor
                     )
                     accept_length += 1
-                if log:
-                    print(f'accept_length: {accept_length}')
+                input_len = input_ids.size(-1)
                 # next_token = gen_token(prob=sample_p, logits_processor=logits_processor)
                 # Do the following:
                 # - add accepted tokens to input_ids
@@ -573,6 +574,9 @@ class AsyncSDWrapper(nn.Module):
                     mixed_hidden_state,
                     sample_p
                 )
+                if log:
+                    accept_tokens = draft_tokens[0, accept_indices].tolist()
+                    print(f'  - accept_length: {accept_length}, accept_tokens: {accept_tokens}, token: {sample_token.tolist()}')
 
                 # mixed_hidden_state: compress for lower transmission; pass self.eagle3_fc in forward in default
                 # mixed_hidden_state = self.eagle3_fc(hidden_states)

@@ -195,7 +195,7 @@ class CommCS(CommZMQ):
             while not self.recv_queues:
                 time.sleep(1)
             # for single-request test
-            self.client_identity = next(iter(self.recv_queues))
+            # self.client_identity = next(iter(self.recv_queues))
 
         else:  # client
             self.socket = self.context.socket(zmq.DEALER)
@@ -234,9 +234,8 @@ class CommCS(CommZMQ):
         self.socket.send_multipart([identity, identity])
         print(f"Client {identity} registered")
 
-        if self.client_identity is None:
-            self.client_identity = next(iter(self.recv_queues))
-
+        if not hasattr(self, 'client_identity') or self.client_identity is None:  #self.client_identity is None:
+            self.client_identity = identity
 
     def _handle_recv_tensor(self, identity, header, content):
         tensor = load_tensor(header, content)
@@ -303,6 +302,13 @@ class CommCS(CommZMQ):
                 self.socket.send_multipart([header, raw])
             except Empty:
                 continue
+
+    def barrier(self):
+        if self.is_server:
+            self.socket.send_multipart([b'BAR', b''])
+            self.socket.recv_multipart()
+        else:
+            self.socket.send_multipart([b'BAR', b''])
 
     def send_to(self, tensor, identity=None):
         """
