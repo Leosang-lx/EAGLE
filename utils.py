@@ -2,6 +2,22 @@ import torch
 from contextlib import nullcontext
 import numpy as np
 from typing import Tuple, List
+import pickle as pl
+from datetime import datetime
+
+def save_as(obj, fname):
+    with open(fname, 'wb') as f:
+        pl.dump(obj, f)
+
+def load_from(fname):
+    return pl.load(fname)
+
+def is_strictly_ascending(arr):
+    return all(arr[i] < arr[i+1] for i in range(len(arr)-1))
+
+def get_time_str():
+    now = datetime.now()
+    return f"{now.month:02d}-{now.day:02d}-{now.hour:02d}-{now.minute:02d}"
 
 def prof_or_null(name, prof=None, cpu=False):
     if prof is not None:

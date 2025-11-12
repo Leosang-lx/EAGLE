@@ -10,7 +10,7 @@ import multiprocessing as mp
 from AsyncSD import AsyncSDWrapper, load_draft_model
 from profiler import prof
 from ASDConfig import config as rconfig
-from utils import prof_or_null
+from utils import prof_or_null, is_strictly_ascending, save_as, get_time_str
 
 def main(is_server=None):
     assert torch.cuda.is_available(), "CUDA is not available"
@@ -107,6 +107,10 @@ def main(is_server=None):
 
 
     prof.print_all_events()
+    if rconfig.save_timestamps:
+        assert is_strictly_ascending(prof.cumulative_time_events[0]['timestamp'])
+        role = 'SERVER' if is_server else 'CLIENT'
+        save_as(prof.cumulative_time_events, f'records/{get_time_str()}-{role}.rec')
 
     asd_model.comm.stop()
 
