@@ -145,36 +145,6 @@ class AsyncSDWrapper(nn.Module):
             # return orig, mixed_hidden_state
         return orig, hidden_states
     
-    def prefill_sync(
-            self,
-            input_ids=None,
-            past_key_values=None,
-            logits_processor=None,
-            prof=None,
-    ):
-        comm = self.comm
-        device = self.device
-
-        if not comm.is_server:  # drafter client
-            # send input_ids to server
-            comm.send_to(input_ids)
-            # recv mixed hidden_state and the new token
-            mixed_hidden_state = comm.recv_from(device=device)
-            token = comm.recv_from(device=device)
-            
-            return token, mixed_hidden_state
-            
-        else:  # server with base model
-            input_ids = comm.recv_from(device=device)  # todo: fix recv_from() on server
-            orig, mixed_hidden_state = self(
-                input_ids, past_key_values, output_orig=True
-            )
-            comm.send_to(mixed_hidden_state)  # todo: fix send_to() on server
-            
-            token = gen_token(logits=orig[:, -1], logits_processor=logits_processor)
-            comm.send_to(token)
-
-    
     def co_generate(
             self,
             input_ids,
@@ -282,7 +252,6 @@ class AsyncSDWrapper(nn.Module):
                         should_stop = torch.ones(1, dtype=torch.int64)
                     
                 comm.send_to(should_stop)
-                print('Send should_stop', should_stop)
                 if should_stop.item() == 1:
                     break
             else:
@@ -351,12 +320,14 @@ class AsyncSDWrapper(nn.Module):
         while True:
             turn_idx += 1
             if log:
-                print(f"Turn {turn_idx:2d}")
+                print(f"- Turn {turn_idx:2d}")
+                tree_depths = []
             ####################
             # drafter client
             ####################
             if not self.is_server:
-                # if log:
+                if log:
+                    tree_depths.append(str(retrieve_indices.size(-1)))
                 #     print(f'draft_tokens: {draft_tokens.shape}\n{draft_tokens}')
                 #     print(f'retrieve_indices: {retrieve_indices.shape}\n{retrieve_indices}')
                 #     print(f'tree_mask: {tree_mask.shape}\n{tree_mask}')
@@ -367,6 +338,7 @@ class AsyncSDWrapper(nn.Module):
 
                     if turn_idx == 0:  # first turn: expand the tree without pruning
                         existing_draft_length = draft_tokens.size(-1)
+                        # expand_last
                         draft_tokens, retrieve_indices, tree_mask, tree_position_ids, last_ea_state = self.ea_layer.expand_last(
                             last_ea_tree,
                             last_ea_state,
@@ -383,17 +355,20 @@ class AsyncSDWrapper(nn.Module):
 
                     else:  # following turns: expand the tree based on the latest context
                         # recv the latest context
-                        # pruning_info, mixed_hidden_state = comm.recv_multi(device)
-                        pruning_info = comm.recv_from()
-                        mixed_hidden_state = comm.recv_from(device=device)  
+                        with prof_or_null(f'Drafter: recv_from', prof):
+                            # pruning_info, mixed_hidden_state = comm.recv_multi(device)
+                            pruning_info = comm.recv_from()
+                            mixed_hidden_state = comm.recv_from(device=device)  
                         accept_len = pruning_info.size(-1) - 1
                         accept_length_this_round += accept_len
 
                         accepted_indices = pruning_info[:-1]
                         next_token_id = pruning_info[-1]
-                        if log:
-                            print(f'accept_length: {accept_len}')
                         accept_tokens = draft_tokens[:, accepted_indices]
+
+                        if log:
+                            print(f'  - accept_length: {accept_len}, accept_tokens: {accept_tokens[0].tolist()}, token: {next_token_id}')
+
                                               # pruning based on the latest context first
                         truncate, pruned_tree = drafter_prune_draft(  # todo: fix this
                             pruning_info[:-1],  # accept_indices,
@@ -412,6 +387,8 @@ class AsyncSDWrapper(nn.Module):
                             break
                         
                         draft_tokens, tree_mask, tree_position_ids, retrieve_indices = pruned_tree
+                        if log:
+                            tree_depths.append(str(retrieve_indices.size(-1)))
                         existing_draft_length = draft_tokens.size(-1)
 
                         input_ids_ea = torch.cat((input_ids, token), dim=-1)
@@ -435,6 +412,7 @@ class AsyncSDWrapper(nn.Module):
                             # return_last=True,
                             prof=prof,
                         )
+                        tree_position_ids2 = tree_position_ids2 + input_ids.size(-1)
                         # merge the two draft trees (both roots at the latest context)
                         draft_tokens, retrieve_indices, tree_mask, tree_position_ids, appended_length = merge_two_tree(  # todo: fix this
                             (draft_tokens, retrieve_indices, tree_mask, tree_position_ids),
@@ -442,6 +420,9 @@ class AsyncSDWrapper(nn.Module):
                         )
                 #         print('Appended draft length:', appended_length)
                 # print('Existing draft length:', existing_draft_length)
+                if log:
+                    tree_depths.append(str(retrieve_indices.size(-1)))
+                    print('  - Tree depth:', '->'.join(tree_depths))
 
                 # organize newly generated part of draft tokens and send to verifier
                 appended_draft_tokens = draft_tokens[..., existing_draft_length:]
@@ -458,6 +439,8 @@ class AsyncSDWrapper(nn.Module):
                     print('appended_tree_position_ids', appended_tree_position_ids.shape)
                     print('retrieve_indices', retrieve_indices.shape)
                     raise
+                
+                # appended_tree_position_ids = appended_tree_position_ids + input_ids.size(-1)
 
                 comm.send_to(appended_draft_tokens)
                 comm.send_to(appended_tree_mask)
@@ -482,7 +465,7 @@ class AsyncSDWrapper(nn.Module):
                 if turn_idx == 0:
                     with prof_or_null('Verifer: recv_from', prof, cpu=True):
                         draft_tokens = comm.recv_from(device=device)
-                        tree_mask = comm.recv_from(device=device)
+                        tree_mask = comm.recv_from()
                         tree_position_ids = comm.recv_from(device=device)
                         retrieve_indices = comm.recv_from()
                     
