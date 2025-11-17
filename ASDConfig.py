@@ -10,14 +10,15 @@ class ASDConfig:
 
     use_spec: bool = False
 
-    total_token: int = 12
+    total_token: int = 60
     top_k: int = 10
-    depth: int = 1
-    expand_size: int = 64
+    depth: int = 5
+    expand_size: int = 60
+    expand_depth: int = 6
 
 
-    warmup: int = 10
-    test: int = 3
+    warmup: int = 5
+    test: int = 1
 
     max_new_tokens: int = 256
 

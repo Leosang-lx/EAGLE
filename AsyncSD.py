@@ -321,13 +321,13 @@ class AsyncSDWrapper(nn.Module):
             turn_idx += 1
             if log:
                 print(f"- Turn {turn_idx:2d}")
-                tree_depths = []
+                # tree_depths = []
             ####################
             # drafter client
             ####################
             if not self.is_server:
-                if log:
-                    tree_depths.append(str(retrieve_indices.size(-1)))
+                # if log:
+                #     tree_depths.append(str(retrieve_indices.size(-1)))
                 #     print(f'draft_tokens: {draft_tokens.shape}\n{draft_tokens}')
                 #     print(f'retrieve_indices: {retrieve_indices.shape}\n{retrieve_indices}')
                 #     print(f'tree_mask: {tree_mask.shape}\n{tree_mask}')
@@ -345,7 +345,7 @@ class AsyncSDWrapper(nn.Module):
                             self.ea_layer.lm_head,
                             logits_processor,
                             device,
-                            expand_depth=rconfig.depth,
+                            expand_depth=rconfig.expand_depth,
                             expand_size=rconfig.expand_size,
                             # return_last=rconfig.none_expand,  # no need for return_last
                             # prof=prof
@@ -355,7 +355,7 @@ class AsyncSDWrapper(nn.Module):
 
                 else:  # following turns: expand the tree based on the latest context
                     # recv the latest context
-                    with prof_or_null(f'Drafter: wait_pruning_info', prof):
+                    with prof_or_null(f'Drafter: wait_verifer', prof):
                         # pruning_info, mixed_hidden_state = comm.recv_multi(device)
                         pruning_info = comm.recv_from()
                         mixed_hidden_state = comm.recv_from(device=device)  
@@ -388,8 +388,8 @@ class AsyncSDWrapper(nn.Module):
                         break
                     
                     draft_tokens, tree_mask, tree_position_ids, retrieve_indices = pruned_tree
-                    if log:
-                        tree_depths.append(str(retrieve_indices.size(-1)))
+                    # if log:
+                    #     tree_depths.append(str(retrieve_indices.size(-1)))
                     existing_draft_length = draft_tokens.size(-1)
 
                     input_ids_ea = torch.cat((input_ids, token), dim=-1)
@@ -409,7 +409,7 @@ class AsyncSDWrapper(nn.Module):
                             self.ea_layer.lm_head,
                             logits_processor,
                             total_tokens=rconfig.total_token,
-                            depth=rconfig.depth,
+                            depth=rconfig.expand_depth,
                             top_k=rconfig.top_k,
                             # return_last=True,
                             # prof=prof,
@@ -421,9 +421,9 @@ class AsyncSDWrapper(nn.Module):
                             (draft_tokens2, retrieve_indices2, tree_mask2, tree_position_ids2),
                         )
 
-                if log:
-                    tree_depths.append(str(retrieve_indices.size(-1)))
-                    print('  - Tree depth:', '->'.join(tree_depths))
+                # if log:
+                #     tree_depths.append(str(retrieve_indices.size(-1)))
+                #     print('  - Tree depth:', '->'.join(tree_depths))
 
                 # organize newly generated part of draft tokens and send to verifier
                 appended_draft_tokens = draft_tokens[..., existing_draft_length:]
