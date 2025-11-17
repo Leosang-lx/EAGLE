@@ -26,8 +26,8 @@ model = EaModel.from_pretrained(
     torch_dtype=torch.float16,
     # low_cpu_mem_usage=True,
     device_map=f"cuda:{device}",
-    total_token=64,
-    depth=6,
+    total_token=rconfig.total_token,
+    depth=rconfig.depth,
 )
 
 # show memory usage
@@ -48,8 +48,8 @@ model.eval()
 
 
 # [prompt and template]
-# your_message = rconfig.your_message
-your_message = 'Who are you?'
+your_message = rconfig.your_message
+# your_message = 'Who are you?'
 if 'vicuna' in rconfig.model_name.lower():
     conv = get_conversation_template("vicuna")
 elif 'llama2' in rconfig.model_name.lower():
@@ -96,8 +96,12 @@ for w in tqdm(range(rconfig.warmup)):
 
 ### test
 for t in tqdm(range(rconfig.test)):
-    with prof_or_null('eagenerate', prof):
-        output_ids, new_token, idx = model.eagenerate(input_ids,temperature=0.0,max_new_tokens=512, log=True, prof=prof)
+    if rconfig.use_spec:
+        with prof_or_null('eagenerate', prof):
+            output_ids, new_token, idx = model.eagenerate(input_ids,temperature=0.0,max_new_tokens=512, log=True, prof=prof)
+    else:  # autoregressive
+        with prof_or_null('naivegenerate', prof):
+            output_ids, new_token, idx = model.naivegenerate(input_ids,temperature=0.0,max_new_tokens=512, log=True)
 
 
 if show_mem:

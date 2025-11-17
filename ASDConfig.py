@@ -8,22 +8,26 @@ class ASDConfig:
     model_name: str = 'llama3.1-8b'
     spec_method: str = 'ea3'  # 'ea' or 'ea3'
 
-    total_token: int = 64
+    use_spec: bool = False
+
+    total_token: int = 12
     top_k: int = 10
-    depth: int = 6
+    depth: int = 1
     expand_size: int = 64
 
+
     warmup: int = 10
-    test: int = 1
+    test: int = 3
 
     max_new_tokens: int = 256
 
-    log: bool = True
+    log: bool = False
     prof: bool = True
     save_timestamps: bool = True
     
     if mode == 'demo':
-        your_message: str ='Who are you?'
+        # your_message: str ='Who are you?'
+        your_message: str = 'What are some easy and healthy recipes for a quick dinner?'
         temperature: float = 0.0
     
     # model path
