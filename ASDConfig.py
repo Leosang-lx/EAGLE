@@ -5,7 +5,7 @@ from typing import List
 class ASDConfig:
     platform = 'server'  # 'server' or 'client'
     mode = 'demo'  # 'demo' or 'eval'
-    model_name: str = 'llama3.1-8b'
+    model_name: str = 'vicuna-13b'
     spec_method: str = 'ea3'  # 'ea' or 'ea3'
 
     use_spec: bool = False
@@ -17,7 +17,7 @@ class ASDConfig:
     expand_depth: int = 6
 
 
-    warmup: int = 5
+    warmup: int = 8
     test: int = 1
 
     max_new_tokens: int = 256

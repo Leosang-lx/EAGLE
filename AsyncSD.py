@@ -540,3 +540,17 @@ class AsyncSDWrapper(nn.Module):
         else:
             return input_ids
 
+    def specedge(
+            self,
+            kv_cache=None,
+            logits_processor=None,
+            input_ids=None,
+            token=None,
+            mixed_hidden_state=None,
+            # new_token=None,
+            max_new_tokens=None,
+            max_length=None,
+            log=False,
+            prof=None,
+    ):
+        raise NotImplementedError('SpecEdge not implemented yet.')
